@@ -41,6 +41,7 @@ async def test_cache_miss_writes_ttl(monkeypatch, sample_market_data):
         return {**sample_market_data, "source": "yfinance"}
 
     monkeypatch.setattr("services.market_service.get_redis", AsyncMock(return_value=mock_redis))
+    monkeypatch.setattr("services.polygon_service.get_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr("services.market_service._fetch_yfinance", fake_yfinance)
 
     await get_market_data("TSLA")

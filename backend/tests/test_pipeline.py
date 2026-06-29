@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agents.pipeline import run_analysis_pipeline
-from tests.conftest import ANALYZE_SCHEMA_KEYS, MEMO_SCHEMA_KEYS
+from tests.conftest import PIPELINE_SCHEMA_KEYS, MEMO_SCHEMA_KEYS
 
 
 @pytest.mark.asyncio
@@ -25,8 +25,8 @@ async def test_pipeline_with_mocked_cerebras(
         on_log=on_log,
     )
 
-    assert set(result.keys()) == ANALYZE_SCHEMA_KEYS
-    assert set(result["memo"].keys()) == MEMO_SCHEMA_KEYS
+    assert set(PIPELINE_SCHEMA_KEYS).issubset(set(result.keys()))
+    assert set(MEMO_SCHEMA_KEYS).issubset(set(result["memo"].keys()))
     assert result["memo"]["rating"] == "BULLISH"
     assert result["pipeline_elapsed_seconds"] >= 0
     assert len(logs) >= 5

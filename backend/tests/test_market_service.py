@@ -1,6 +1,5 @@
 """Unit tests for market_service."""
-import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,9 +7,49 @@ from services.market_service import ASSET_CONFIG, _fallback_data, get_market_dat
 
 
 @pytest.mark.asyncio
-async def test_unknown_ticker_raises_value_error():
-    with pytest.raises(ValueError, match="Unknown asset"):
-        await get_market_data("INVALID")
+async def test_unknown_ticker_uses_fallback(monkeypatch):
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock()
+
+    async def failing_fetch(_ticker, _config):
+        raise RuntimeError("yfinance unavailable")
+
+    monkeypatch.setattr("services.market_service.get_redis", AsyncMock(return_value=mock_redis))
+    monkeypatch.setattr("services.polygon_service.polygon_available", AsyncMock(return_value=False))
+    monkeypatch.setattr("services.polygon_service.get_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr("services.market_service._fetch_yfinance", failing_fetch)
+    monkeypatch.setattr(
+        "services.market_service._fetch_alpha_vantage",
+        AsyncMock(side_effect=RuntimeError("alpha vantage unavailable")),
+    )
+
+    data = await get_market_data("RIVN")
+
+    assert data["source"] == "fallback"
+    assert data["asset_key"] == "RIVN"
+    assert "price" in data
+
+
+@pytest.mark.asyncio
+async def test_unknown_ticker_via_router_returns_data(client, monkeypatch):
+    async def fake_market(ticker):
+        return {
+            "asset_key": ticker,
+            "price": 100,
+            "change_pct": 1.0,
+            "volatility_30d": 20,
+            "full_name": ticker,
+            "asset_class": "Equity",
+            "icon": "show_chart",
+            "is_positive": True,
+            "source": "fallback",
+            "fetched_at": 0,
+        }
+
+    monkeypatch.setattr("routers.market.get_market_data", fake_market)
+    resp = await client.get("/api/market/RIVN")
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -23,6 +62,8 @@ async def test_yfinance_response_schema(monkeypatch, sample_market_data):
     mock_redis.setex = AsyncMock()
 
     monkeypatch.setattr("services.market_service.get_redis", AsyncMock(return_value=mock_redis))
+    monkeypatch.setattr("services.polygon_service.polygon_available", AsyncMock(return_value=False))
+    monkeypatch.setattr("services.polygon_service.get_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr("services.market_service._fetch_yfinance", fake_yfinance)
 
     data = await get_market_data("TSLA")
@@ -48,7 +89,13 @@ async def test_fallback_on_fetch_failure(monkeypatch):
     mock_redis.get = AsyncMock(return_value=None)
 
     monkeypatch.setattr("services.market_service.get_redis", AsyncMock(return_value=mock_redis))
+    monkeypatch.setattr("services.polygon_service.polygon_available", AsyncMock(return_value=False))
+    monkeypatch.setattr("services.polygon_service.get_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr("services.market_service._fetch_yfinance", failing_fetch)
+    monkeypatch.setattr(
+        "services.market_service._fetch_alpha_vantage",
+        AsyncMock(side_effect=RuntimeError("alpha vantage unavailable")),
+    )
 
     data = await get_market_data("TSLA")
 
@@ -65,9 +112,3 @@ def test_fallback_data_matches_prototype():
     assert data["change_pct"] == 5.8
     assert data["volatility_30d"] == 54.2
     assert data["source"] == "fallback"
-
-
-@pytest.mark.asyncio
-async def test_unknown_ticker_via_router_returns_404(client):
-    resp = await client.get("/api/market/INVALID")
-    assert resp.status_code == 404

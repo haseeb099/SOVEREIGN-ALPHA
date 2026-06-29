@@ -17,7 +17,7 @@ def test_development_defaults_without_allowed_origins(monkeypatch):
     assert "http://127.0.0.1:8000" in origins
 
 
-def test_explicit_allowed_origins_override_defaults(monkeypatch):
+def test_explicit_allowed_origins_merge_dev_defaults_in_development(monkeypatch):
     monkeypatch.setenv(
         "ALLOWED_ORIGINS",
         "https://sovereign-alpha.vercel.app,https://app.example.com",
@@ -26,10 +26,9 @@ def test_explicit_allowed_origins_override_defaults(monkeypatch):
 
     origins = cors_config.get_allowed_origins()
 
-    assert origins == [
-        "https://sovereign-alpha.vercel.app",
-        "https://app.example.com",
-    ]
+    assert "https://sovereign-alpha.vercel.app" in origins
+    assert "https://app.example.com" in origins
+    assert "http://localhost:3000" in origins
 
 
 def test_wildcard_origin_is_rejected(monkeypatch):
@@ -69,5 +68,7 @@ def test_main_module_never_registers_wildcard_cors(monkeypatch):
     cors_middleware = next(
         m for m in main.app.user_middleware if m.cls.__name__ == "CORSMiddleware"
     )
-    assert cors_middleware.kwargs["allow_origins"] == ["http://localhost:8000"]
-    assert "*" not in cors_middleware.kwargs["allow_origins"]
+    allowed = cors_middleware.kwargs["allow_origins"]
+    assert "http://localhost:8000" in allowed
+    assert "http://localhost:3000" in allowed
+    assert "*" not in allowed

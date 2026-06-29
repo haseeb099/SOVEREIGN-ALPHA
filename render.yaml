@@ -1,5 +1,6 @@
-# Render Blueprint — https://render.com/docs/blueprint-spec
-# Connect repo → New Blueprint → point at this file → set secret env vars in dashboard.
+# Render: FastAPI backend only. Deploy apps/web to Vercel (see vercel.json).
+# Render Blueprint â€” https://render.com/docs/blueprint-spec
+# Connect repo â†’ New Blueprint â†’ point at this file â†’ set secret env vars in dashboard.
 
 services:
   - type: web

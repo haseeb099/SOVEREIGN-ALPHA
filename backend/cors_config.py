@@ -22,6 +22,10 @@ def get_allowed_origins() -> list[str]:
 
     if raw:
         origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        if environment in {"development", "dev", "local", "test"}:
+            for origin in DEFAULT_DEV_ORIGINS:
+                if origin not in origins:
+                    origins.append(origin)
     elif environment in {"development", "dev", "local", "test"}:
         origins = DEFAULT_DEV_ORIGINS.copy()
     else:

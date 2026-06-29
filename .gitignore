@@ -1,4 +1,8 @@
 .env
+node_modules/
+.next/
+.turbo/
+dist/
 __pycache__/
 *.pyc
 .venv/
@@ -6,3 +10,5 @@ __pycache__/
 backend/.pytest_cache/
 .coverage
 backend/.coverage
+*.log
+.DS_Store

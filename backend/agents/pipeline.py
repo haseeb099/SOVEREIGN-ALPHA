@@ -59,6 +59,8 @@ Output ONLY valid JSON with this structure:
   "confidence_band": [210, 270],
   "key_catalysts": ["Catalyst 1", "Catalyst 2", "Catalyst 3"],
   "time_horizon": "12-18 months",
+  "citations": [{"type": "metric", "label": "Operating Margin", "value": "19.2%"}],
+  "factor_weights": {"margins": 0.35, "fsd": 0.25, "rates": 0.20},
   "log_message": "One-line summary for telemetry"
 }"""
 
@@ -71,6 +73,8 @@ Output ONLY valid JSON with this structure:
   "bear_price_target": 140.00,
   "key_risks": ["Risk 1", "Risk 2", "Risk 3"],
   "thesis_attack": "Specific argument against the bull catalyst",
+  "citations": [{"type": "risk", "label": "Competition", "value": "BYD market share +12%"}],
+  "factor_weights": {"competition": 0.32, "margins": 0.28, "regulatory": 0.20},
   "log_message": "One-line summary for telemetry"
 }"""
 
@@ -86,6 +90,11 @@ Output ONLY valid JSON with this structure:
   "bull_verdict": "2 sentence bull case for display",
   "bear_verdict": "2 sentence bear case for display",
   "price_target": 220.00,
+  "distribution": {
+    "bear": {"price": 165.0, "probability": 0.20},
+    "base": {"price": 210.0, "probability": 0.55},
+    "bull": {"price": 285.0, "probability": 0.25}
+  },
   "thesis_points": [
     {"id": 1, "text": "...", "metric": "Margins", "status": "PASS|RISK|FAIL", "current_value": "19.2%", "threshold": "18%"}
   ],
@@ -261,6 +270,7 @@ Red Team Agent Output:\n{json.dumps(results.get('red_team', {}), indent=2)}
             "rating": synthesis.get("rating", "NEUTRAL"),
             "confidence_score": synthesis.get("confidence_score", 5.0),
             "audit_warnings": synthesis.get("audit_warnings") or [],
+            "distribution": synthesis.get("distribution"),
         },
         "thesis_points": synthesis.get("thesis_points", thesis_points or []),
         "agent_logs": [],  # Populated via WebSocket, not in REST response

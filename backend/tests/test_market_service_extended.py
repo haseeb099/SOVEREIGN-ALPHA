@@ -86,6 +86,7 @@ async def test_btc_market_uses_ccxt_source(monkeypatch, sample_market_data):
         return {**sample_market_data, "asset_key": "BTC", "source": "ccxt_binance"}
 
     monkeypatch.setattr("services.market_service.get_redis", AsyncMock(return_value=mock_redis))
+    monkeypatch.setattr("services.polygon_service.get_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr("services.market_service._fetch_ccxt", fake_ccxt)
 
     data = await get_market_data("BTC")

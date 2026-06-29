@@ -18,8 +18,20 @@ def test_analyze_schema_file_is_valid_json_schema(analyze_schema):
     assert "BULLISH" in analyze_schema["properties"]["memo"]["properties"]["rating"]["enum"]
 
 
-def test_sample_pipeline_result_satisfies_contract(sample_pipeline_result):
-    errors = validate_against_schema(sample_pipeline_result, "analyze_response.schema.json")
+def test_sample_pipeline_result_satisfies_contract(sample_pipeline_result, sample_market_data):
+    from services.sovereign_score_service import attach_sovereign_score
+    from services.valuation_engine import apply_to_memo
+
+    payload = dict(sample_pipeline_result)
+    raw = payload.get("raw_agents") or {}
+    payload["memo"] = apply_to_memo(
+        payload["memo"],
+        sample_market_data.get("price", 0),
+        raw.get("bull"),
+        raw.get("red_team"),
+    )
+    payload = attach_sovereign_score(payload, sample_market_data)
+    errors = validate_against_schema(payload, "analyze_response.schema.json")
     assert errors == [], f"Contract violations: {errors}"
 
 
@@ -31,14 +43,29 @@ async def test_analyze_endpoint_response_satisfies_contract(
     sample_pipeline_result,
     monkeypatch,
 ):
+    async def enriched_pipeline(**kwargs):
+        from services.sovereign_score_service import attach_sovereign_score
+        from services.valuation_engine import apply_to_memo
+
+        result = dict(sample_pipeline_result)
+        raw = result.get("raw_agents") or {}
+        result["memo"] = apply_to_memo(
+            result["memo"],
+            sample_market_data.get("price", 0),
+            raw.get("bull"),
+            raw.get("red_team"),
+        )
+        return attach_sovereign_score(result, sample_market_data)
+
     monkeypatch.setattr(
         "routers.analyze.get_market_data",
         AsyncMock(return_value=sample_market_data),
     )
     monkeypatch.setattr(
         "routers.analyze.run_analysis_pipeline",
-        AsyncMock(return_value=sample_pipeline_result),
+        enriched_pipeline,
     )
+    monkeypatch.setattr("routers.analyze.get_earnings_calendar", AsyncMock(return_value=None))
 
     resp = await client.post(
         "/api/analyze",
@@ -91,6 +118,18 @@ async def test_pipeline_output_satisfies_contract(
         market_data=sample_market_data,
         scenario=sample_scenario,
     )
+
+    from services.sovereign_score_service import attach_sovereign_score
+    from services.valuation_engine import apply_to_memo
+
+    raw = result.get("raw_agents") or {}
+    result["memo"] = apply_to_memo(
+        result["memo"],
+        sample_market_data.get("price", 0),
+        raw.get("bull"),
+        raw.get("red_team"),
+    )
+    result = attach_sovereign_score(result, sample_market_data)
 
     errors = validate_against_schema(result, "analyze_response.schema.json")
     assert errors == [], f"Pipeline contract violations: {errors}"

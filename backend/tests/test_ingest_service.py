@@ -59,9 +59,10 @@ def test_extract_pdf_text_with_mocked_fitz(monkeypatch):
     fake_fitz = type("fitz", (), {"open": fake_open})()
     monkeypatch.setitem(__import__("sys").modules, "fitz", fake_fitz)
 
-    text = _extract_pdf_text(b"%PDF-fake")
+    text, page_map = _extract_pdf_text(b"%PDF-fake")
     assert "Page one text" in text
     assert "margins" in text
+    assert page_map
 
 
 @pytest.mark.asyncio

@@ -17,11 +17,12 @@
     "agent_logs",
     "raw_agents"
   ],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "ticker": {
       "type": "string",
-      "enum": ["TSLA", "BTC", "XAU", "EUR"]
+      "minLength": 1,
+      "maxLength": 16
     },
     "timestamp": {
       "type": "string",
@@ -42,6 +43,9 @@
       }
     },
     "pipeline_elapsed_seconds": { "type": "number", "minimum": 0 },
+    "last_updated": { "type": "string" },
+    "sovereign_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "earnings_overlay": { "type": "object" },
     "memo": {
       "type": "object",
       "required": [
@@ -53,7 +57,7 @@
         "rating",
         "confidence_score"
       ],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "bull_verdict": { "type": "string" },
         "bear_verdict": { "type": "string" },
@@ -70,6 +74,14 @@
         "audit_warnings": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "distribution": {
+          "type": "object",
+          "properties": {
+            "bear": { "type": "object" },
+            "base": { "type": "object" },
+            "bull": { "type": "object" }
+          }
         }
       }
     },

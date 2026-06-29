@@ -29,7 +29,7 @@ MARKET_SCHEMA_KEYS = {
     "fetched_at",
 }
 
-ANALYZE_SCHEMA_KEYS = {
+PIPELINE_SCHEMA_KEYS = {
     "ticker",
     "timestamp",
     "asset_price",
@@ -43,6 +43,16 @@ ANALYZE_SCHEMA_KEYS = {
     "raw_agents",
 }
 
+ANALYZE_SCHEMA_KEYS = {
+    *PIPELINE_SCHEMA_KEYS,
+    "sovereign_score",
+    "sovereign_score_detail",
+    "last_updated",
+}
+
+# Keys returned by POST /api/analyze after enrichment
+ANALYZE_API_RESPONSE_KEYS = ANALYZE_SCHEMA_KEYS
+
 MEMO_SCHEMA_KEYS = {
     "bull_verdict",
     "bear_verdict",
@@ -52,6 +62,7 @@ MEMO_SCHEMA_KEYS = {
     "rating",
     "confidence_score",
     "audit_warnings",
+    "distribution",
 }
 
 
@@ -128,6 +139,11 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             "bull_verdict": "Production scale drives unit-cost advantage.",
             "bear_verdict": "Competitive pressure may squeeze margins.",
             "price_target": 220.0,
+            "distribution": {
+                "bear": {"price": 165.0, "probability": 0.20},
+                "base": {"price": 210.0, "probability": 0.55},
+                "bull": {"price": 285.0, "probability": 0.25},
+            },
             "thesis_points": [
                 {
                     "id": 1,
@@ -208,8 +224,16 @@ def mock_persistence(monkeypatch):
         AsyncMock(return_value="test-analysis-id"),
     )
     monkeypatch.setattr(
+        "routers.analyze.save_health_snapshot",
+        AsyncMock(return_value="test-snapshot-id"),
+    )
+    monkeypatch.setattr(
         "routers.ingest.save_ingestion",
         AsyncMock(return_value="test-ingest-id"),
+    )
+    monkeypatch.setattr(
+        "routers.analyze.evaluate_rules_for_ticker",
+        AsyncMock(return_value=[]),
     )
 
 
@@ -232,6 +256,11 @@ def sample_pipeline_result(sample_market_data, sample_scenario):
             "rating": "BULLISH",
             "confidence_score": 7.5,
             "audit_warnings": [],
+            "distribution": {
+                "bear": {"price": 165.0, "probability": 0.20},
+                "base": {"price": 210.0, "probability": 0.55},
+                "bull": {"price": 285.0, "probability": 0.25},
+            },
         },
         "thesis_points": [
             {

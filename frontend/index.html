@@ -29,7 +29,11 @@
             font-family: var(--font-sans);
             background-color: var(--surface-bg);
             color: #f3f4f6;
-            overflow-x: hidden;
+        }
+
+        .sidebar-scroll {
+            overflow-y: auto;
+            min-height: 0;
         }
 
         .mono-font {
@@ -115,7 +119,7 @@
     <div class="flex-1 flex overflow-hidden w-full relative">
         
         <!-- SIDEBAR: Asset Hub & Document Ingestor -->
-        <aside class="w-80 border-r border-[rgba(255,255,255,0.06)] bg-[#090a0f] flex flex-col shrink-0 z-20">
+        <aside class="w-80 border-r border-[rgba(255,255,255,0.06)] bg-[#090a0f] flex flex-col shrink-0 z-20 overflow-y-auto">
             
             <!-- Asset Selector & Search -->
             <div class="p-4 border-b border-[rgba(255,255,255,0.04)]">
@@ -197,9 +201,9 @@
                 </div>
 
                 <!-- Quick Action Button -->
-                <button onclick="triggerImmediateRecalculation()" class="w-full mt-4 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-lg py-2 px-4 text-xs font-bold hover:from-emerald-500 hover:to-emerald-400 active:scale-[0.98] transition-all flex items-center justify-center space-x-2">
+                <button id="forceRecalcBtn" onclick="triggerImmediateRecalculation()" class="w-full mt-4 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-lg py-2 px-4 text-xs font-bold hover:from-emerald-500 hover:to-emerald-400 active:scale-[0.98] transition-all flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
                     <span class="material-icons text-sm">bolt</span>
-                    <span>FORCE RE-CALCULATION</span>
+                    <span id="forceRecalcLabel">FORCE RE-CALCULATION</span>
                 </button>
             </div>
         </aside>
@@ -224,7 +228,7 @@
                     <div class="h-3 w-px bg-gray-800"></div>
                     <div class="flex items-center space-x-1.5">
                         <span class="text-gray-400">Audit Status:</span>
-                        <span class="font-semibold text-white px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px]" id="auditStateIndicator">WARNINGS IN FOOTNOTES</span>
+                        <span class="font-semibold text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px]" id="auditStateIndicator">CLEAN</span>
                     </div>
                 </div>
             </div>
@@ -236,22 +240,22 @@
                     <!-- Primary Memo View & Synthesis -->
                     <div class="xl:col-span-2 space-y-6">
                         <!-- Summary Quick Stats -->
-                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Assessed Rating</span>
-                                <span class="text-2xl font-black text-white mt-1" id="memoRating">HOLD</span>
+                        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 min-w-0">
+                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between min-w-0">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block truncate" title="Assessed Rating">Assessed Rating</span>
+                                <span class="text-lg xl:text-2xl font-black text-white mt-1 truncate" id="memoRating">HOLD</span>
                             </div>
-                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Target Probability</span>
-                                <span class="text-2xl font-black text-emerald-400 mt-1 mono-font" id="memoConfidence">84%</span>
+                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between min-w-0">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block truncate" title="Thesis Health">Thesis Health</span>
+                                <span class="text-lg xl:text-2xl font-black text-emerald-400 mt-1 mono-font truncate" id="memoConfidence">84%</span>
                             </div>
-                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">12M Target Case</span>
-                                <span class="text-2xl font-black text-white mt-1 mono-font" id="memoTarget">$330.00</span>
+                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between min-w-0">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block truncate" title="12M Target Case">12M Target Case</span>
+                                <span class="text-lg xl:text-2xl font-black text-white mt-1 mono-font truncate break-all" id="memoTarget">$330.00</span>
                             </div>
-                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Overall Risk Index</span>
-                                <span class="text-2xl font-black text-amber-500 mt-1" id="memoRisk">MODERATE</span>
+                            <div class="bg-[#0f111a] p-4 rounded-xl border border-[rgba(255,255,255,0.04)] flex flex-col justify-between min-w-0">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block truncate" title="Overall Risk Index">Overall Risk Index</span>
+                                <span class="text-lg xl:text-2xl font-black text-amber-500 mt-1 truncate" id="memoRisk" title="MODERATE">MOD</span>
                             </div>
                         </div>
 
@@ -315,7 +319,7 @@
                             <div class="space-y-4">
                                 <div>
                                     <div class="flex justify-between text-[10px] mb-1">
-                                        <span class="text-rose-400 font-bold">Bear Case ($220)</span>
+                                        <span class="text-rose-400 font-bold" id="bearCaseLabel">Bear Case ($220)</span>
                                         <span class="text-gray-400 font-bold mono-font" id="probBear">15%</span>
                                     </div>
                                     <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
@@ -324,7 +328,7 @@
                                 </div>
                                 <div>
                                     <div class="flex justify-between text-[10px] mb-1">
-                                        <span class="text-gray-300 font-bold">Base Case ($330)</span>
+                                        <span class="text-gray-300 font-bold" id="baseCaseLabel">Base Case ($330)</span>
                                         <span class="text-gray-400 font-bold mono-font" id="probBase">50%</span>
                                     </div>
                                     <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
@@ -333,7 +337,7 @@
                                 </div>
                                 <div>
                                     <div class="flex justify-between text-[10px] mb-1">
-                                        <span class="text-emerald-400 font-bold">Bull Case ($420)</span>
+                                        <span class="text-emerald-400 font-bold" id="bullCaseLabel">Bull Case ($420)</span>
                                         <span class="text-gray-400 font-bold mono-font" id="probBull">35%</span>
                                     </div>
                                     <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
@@ -378,17 +382,17 @@
                         <p class="text-xs text-gray-400 mt-1">Simulate cross-asset exposure based on macroeconomic events</p>
                         
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800">
-                                <span class="text-[9px] text-gray-400 uppercase">Sector Overexposure</span>
-                                <p class="text-base font-bold text-amber-400 mt-1">Technology & Semi's (42.1%)</p>
+                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800 min-w-0">
+                                <span class="text-[9px] text-gray-400 uppercase truncate block" title="Sector Overexposure">Sector Overexposure</span>
+                                <p class="text-sm font-bold text-amber-400 mt-1 truncate" title="Technology & Semi's (42.1%)">Technology & Semi's (42.1%)</p>
                             </div>
-                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800">
-                                <span class="text-[9px] text-gray-400 uppercase">Interest Rate Risk</span>
-                                <p class="text-base font-bold text-rose-400 mt-1">High Sensitivity (6.2/10)</p>
+                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800 min-w-0">
+                                <span class="text-[9px] text-gray-400 uppercase truncate block" title="Interest Rate Risk">Interest Rate Risk</span>
+                                <p class="text-sm font-bold text-rose-400 mt-1 truncate" title="High Sensitivity (6.2/10)">High Sensitivity (6.2/10)</p>
                             </div>
-                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800">
-                                <span class="text-[9px] text-gray-400 uppercase">Hedge Quality</span>
-                                <p class="text-base font-bold text-emerald-400 mt-1">Strong Gold/Crypto offset</p>
+                            <div class="bg-[#090a0f] p-4 rounded-lg border border-gray-800 min-w-0">
+                                <span class="text-[9px] text-gray-400 uppercase truncate block" title="Hedge Quality">Hedge Quality</span>
+                                <p class="text-sm font-bold text-emerald-400 mt-1 truncate" title="Strong Gold/Crypto offset">Strong Gold/Crypto offset</p>
                             </div>
                         </div>
                     </div>
@@ -403,14 +407,14 @@
                         </div>
 
                         <!-- Copilot Output Feed -->
-                        <div id="copilotResponseBox" class="hidden p-4 bg-[#090a0f] rounded-lg border border-gray-800">
+                        <div id="copilotResponseBox" class="hidden p-4 bg-[#090a0f] rounded-lg border border-gray-800 max-h-64 overflow-y-auto">
                             <div class="flex items-center space-x-2 text-emerald-400 mb-2">
                                 <span class="material-icons text-sm">smart_toy</span>
                                 <span class="text-xs font-bold uppercase tracking-wider">Copilot Response</span>
                             </div>
-                            <p class="text-xs text-gray-300 leading-relaxed" id="copilotResponseText">
+                            <div class="text-xs text-gray-300 leading-relaxed break-words" id="copilotResponseText">
                                 <!-- Query response details injected here -->
-                            </p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -440,15 +444,20 @@
                     <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Live Scenario Simulator</label>
                 </div>
 
+                <p class="text-[10px] text-gray-500 mt-3 leading-relaxed" id="scenarioHelperText">
+                    Adjusts local model instantly. Click <strong class="text-gray-400">Force Re-Calculation</strong> to run AI agents.
+                    <button type="button" onclick="triggerImmediateRecalculation()" class="text-emerald-500 hover:text-emerald-400 ml-1 underline">Apply to AI</button>
+                </p>
+
                 <!-- Sim Parameters sliders -->
-                <div class="space-y-4">
+                <div class="space-y-4 mt-3">
                     <!-- Margins -->
                     <div class="space-y-1">
                         <div class="flex justify-between text-[11px]">
                             <span class="text-gray-300">Operating Margins</span>
                             <span class="font-bold text-white mono-font" id="valMargins">18.5%</span>
                         </div>
-                        <input type="range" id="simMargins" min="10" max="25" step="0.1" value="18.5" oninput="updateSimulator()"
+                        <input type="range" id="simMargins" min="10" max="25" step="0.1" value="18.5" oninput="debouncedUpdateSimulator()"
                             class="w-full accent-emerald-500 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer">
                     </div>
 
@@ -458,7 +467,7 @@
                             <span class="text-gray-300">Interest Rates</span>
                             <span class="font-bold text-white mono-font" id="valRates">4.5%</span>
                         </div>
-                        <input type="range" id="simRates" min="2" max="7" step="0.1" value="4.5" oninput="updateSimulator()"
+                        <input type="range" id="simRates" min="2" max="7" step="0.1" value="4.5" oninput="debouncedUpdateSimulator()"
                             class="w-full accent-sky-500 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer">
                     </div>
 
@@ -468,14 +477,14 @@
                             <span class="text-gray-300">Regulatory Pressure</span>
                             <span class="font-bold text-white mono-font" id="valRegulatory">Low</span>
                         </div>
-                        <input type="range" id="simRegulatory" min="1" max="3" step="1" value="1" oninput="updateSimulator()"
+                        <input type="range" id="simRegulatory" min="1" max="3" step="1" value="1" oninput="debouncedUpdateSimulator()"
                             class="w-full accent-amber-500 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer">
                     </div>
 
                     <!-- General News Sentiment -->
                     <div class="space-y-1">
                         <label class="text-[11px] text-gray-300 block">General News Sentiment</label>
-                        <select id="simSentiment" onchange="updateSimulator()" class="w-full bg-[#121524] border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
+                        <select id="simSentiment" onchange="debouncedUpdateSimulator()" class="w-full bg-[#121524] border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
                             <option value="Bullish">Bullish Momentum</option>
                             <option value="Neutral">Neutral Sideways</option>
                             <option value="Bearish">Bearish Risk-Off</option>
@@ -483,8 +492,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Instant News Feed Injection Area -->
             <div class="p-4 flex-1 overflow-y-auto">
                 <div class="flex items-center space-x-2 mb-3">
                     <span class="material-icons text-amber-500 text-sm animate-pulse">feed</span>
@@ -594,18 +601,22 @@
         // Global UI State
         let currentAsset = "TSLA";
         let activeTab = "memo";
+        let _simDebounceTimer = null;
+
+        function debouncedUpdateSimulator() {
+            clearTimeout(_simDebounceTimer);
+            _simDebounceTimer = setTimeout(() => updateSimulator(), 150);
+        }
 
         // Initialize state engine
         window.onload = function() {
             logTelemetry("[SWARM ENGINE INITIALIZED] Ingesting neural weights for Gemma 4...");
             logTelemetry("[PLATFORM STATUS] Connected directly to Cerebras custom preview endpoint.");
             switchAsset(currentAsset);
-            
-            // Build live events feed sidebar
             buildEventFeed();
-            
-            // Interactive dropzone implementation
+
             const dropzone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('fileInput');
             dropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 dropzone.classList.add('border-emerald-500', 'bg-emerald-500/[0.03]');
@@ -616,10 +627,14 @@
             dropzone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 dropzone.classList.remove('border-emerald-500', 'bg-emerald-500/[0.03]');
-                simulateDocumentUpload();
+                const file = e.dataTransfer?.files?.[0];
+                if (file) simulateDocumentUpload(file);
             });
-            dropzone.addEventListener('click', () => {
-                simulateDocumentUpload();
+            dropzone.addEventListener('click', () => fileInput?.click());
+            fileInput?.addEventListener('change', () => {
+                const file = fileInput.files?.[0];
+                if (file) simulateDocumentUpload(file);
+                fileInput.value = "";
             });
         }
 
@@ -662,9 +677,9 @@
             document.getElementById("simRates").previousElementSibling.firstElementChild.innerText = assetData.rates_label;
             document.getElementById("simRegulatory").previousElementSibling.firstElementChild.innerText = assetData.regulatory_label;
 
-            // Trigger re-render of intelligence models
+            // Trigger context switch telemetry
             logTelemetry(`[CONTEXT SWITCH] Loading analytical vectors for ${assetKey}...`);
-            updateSimulator();
+            if (typeof updateCasePriceLabels === "function") updateCasePriceLabels(assetKey);
         }
 
         function formatAssetPrice(price, key) {
@@ -681,20 +696,23 @@
             // Update simulator value readouts
             document.getElementById("valMargins").innerText = margins.toFixed(1) + "%";
             document.getElementById("valRates").innerText = rates.toFixed(1) + "%";
-            document.getElementById("valRegulatory").innerText = regPressure === 1 ? "Low" : (regPressure === 2 ? "Moderate" : "Critical");
+            const regLabels = ["Low", "Moderate", "Critical"];
+            document.getElementById("valRegulatory").innerText = `${regPressure}/3 ${regLabels[regPressure - 1]}`;
+
+            if (typeof updateCasePriceLabels === "function") updateCasePriceLabels(currentAsset);
 
             // Evaluate Thesis Tracker dynamically
             const assetData = ASSET_INTELLIGENCE_DB[currentAsset];
             let scoreSum = 0;
             const updatedThesisPoints = [];
 
-            // 1. Margins evaluation
+            // 1. Margins evaluation (tightened thresholds)
             let mStatus, mColor, mVal;
-            if (margins >= 18) {
+            if (margins >= 20) {
                 mStatus = "INTACT";
                 mColor = "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
                 mVal = 100;
-            } else if (margins >= 15) {
+            } else if (margins >= 16) {
                 mStatus = "WEAKENING";
                 mColor = "text-amber-400 bg-amber-500/10 border-amber-500/20";
                 mVal = 50;
@@ -706,13 +724,13 @@
             updatedThesisPoints.push({ label: assetData.thesis[0].text, status: mStatus, color: mColor });
             scoreSum += mVal;
 
-            // 2. Rates evaluation
+            // 2. Rates evaluation (tightened thresholds)
             let rStatus, rColor, rVal;
-            if (rates <= 4.8) {
+            if (rates <= 4.0) {
                 rStatus = "INTACT";
                 rColor = "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
                 rVal = 100;
-            } else if (rates <= 5.8) {
+            } else if (rates <= 5.0) {
                 rStatus = "WEAKENING";
                 rColor = "text-amber-400 bg-amber-500/10 border-amber-500/20";
                 rVal = 50;
@@ -742,16 +760,21 @@
             updatedThesisPoints.push({ label: assetData.thesis[1].text, status: regStatus, color: regColor });
             scoreSum += regVal;
 
-            const finalConfidenceScore = Math.round((scoreSum / 300) * 100);
-            
+            let finalConfidenceScore = Math.round((scoreSum / 300) * 100);
+
+            // Wire sentiment into scoring
+            if (sentiment === "Bullish") finalConfidenceScore = Math.min(100, finalConfidenceScore + 10);
+            else if (sentiment === "Bearish") finalConfidenceScore = Math.max(0, finalConfidenceScore - 15);
+
             // Adjust probability models dynamically based on calculations
             let bullProb = Math.round(finalConfidenceScore * 0.4);
-            let bearProb = Math.round((100 - finalConfidenceScore) * 0.5);
+            let bearProb = Math.max(5, Math.round((100 - finalConfidenceScore) * 0.5));
             let baseProb = 100 - bullProb - bearProb;
-
-            // Fallback safety to keep sum to 100%
-            if (bullProb + baseProb + bearProb !== 100) {
-                baseProb = 100 - bullProb - bearProb;
+            if (baseProb < 0) {
+                baseProb = 0;
+                const excess = bullProb + bearProb - 100;
+                bullProb = Math.max(0, bullProb - Math.ceil(excess / 2));
+                bearProb = 100 - bullProb - baseProb;
             }
 
             // Sync visual elements across workspace panels
@@ -772,17 +795,20 @@
             let ratingColor = "text-amber-400";
             if (finalConfidenceScore > 75) { assessedRating = "BUY"; ratingColor = "text-emerald-400"; }
             else if (finalConfidenceScore < 40) { assessedRating = "SELL"; ratingColor = "text-rose-400"; }
-            
+
             document.getElementById("memoRating").innerText = assessedRating;
-            document.getElementById("memoRating").className = `text-2xl font-black ${ratingColor} mt-1`;
+            document.getElementById("memoRating").className = `text-lg xl:text-2xl font-black ${ratingColor} mt-1 truncate`;
 
             let riskIndex = "MODERATE";
             let riskColor = "text-amber-500";
             if (regPressure === 3 || rates >= 6.0) { riskIndex = "HIGH"; riskColor = "text-rose-500"; }
             else if (regPressure === 1 && rates <= 3.5) { riskIndex = "LOW"; riskColor = "text-emerald-500"; }
 
-            document.getElementById("memoRisk").innerText = riskIndex;
-            document.getElementById("memoRisk").className = `text-2xl font-black ${riskColor} mt-1`;
+            const riskAbbrev = { LOW: "LOW", MODERATE: "MOD", HIGH: "HIGH" };
+            const riskEl = document.getElementById("memoRisk");
+            riskEl.innerText = riskAbbrev[riskIndex] || riskIndex;
+            riskEl.title = riskIndex;
+            riskEl.className = `text-lg xl:text-2xl font-black ${riskColor} mt-1 truncate`;
 
             // Adjust Target valuation progress bars
             document.getElementById("probBear").innerText = `${bearProb}%`;
@@ -814,18 +840,21 @@
                 <p class="mb-3">Our quantitative model, utilizing the newly deployed <strong>Gemma 4-31B</strong> running inside <strong>Cerebras' high-performance infrastructure</strong>, has completed a fresh analysis sweep of <strong>${assetData.fullName} (${currentAsset})</strong>. Based on input scenario configurations including operating lines at <strong>${margins.toFixed(1)}%</strong> and target macro rates set to <strong>${rates.toFixed(1)}%</strong>, the overall strategic confidence indicator tracks at <strong>${finalConfidenceScore}%</strong>.</p>
                 <p class="mb-3">Our model has dynamically validated the primary structural investment thesis vectors. Systemic geopolitical and policy conditions currently index as <strong>${riskIndex} RISK</strong>. Under this evaluated envelope, the target execution profile has been updated to <strong>${assessedRating}</strong> with an adjusted expected target ceiling computed to <strong>${formatAssetPrice(computedTarget, currentAsset)}</strong> over the next twelve months.</p>
                 <p class="font-semibold text-white mt-4 mb-2">Footnote Integrity & Internal Auditing Trail</p>
-                <p>Cross-examination logs verify alignment across primary table values and raw footnotes. No catastrophic deviations or anomalous accounting variables were identified in this run. Continuous tracking remains active.</p>
+                <p id="memoFootnote">Cross-examination logs verify alignment across primary table values and raw footnotes. No catastrophic deviations or anomalous accounting variables were identified in this run. Continuous tracking remains active.</p>
+                <details class="mt-4 border border-gray-800 rounded-lg overflow-hidden" id="auditDetails">
+                    <summary class="cursor-pointer px-4 py-2 bg-[#0c0d14] text-xs font-bold text-gray-300 hover:bg-gray-800/50 transition-colors">
+                        Continuous Audit Details
+                    </summary>
+                    <div class="p-4 space-y-2" id="auditDetailsBody"></div>
+                </details>
             `;
             document.getElementById("memoBody").innerHTML = generatedMemoText;
 
-            // Trigger telemetry activity logs
-            const mockTokenRate = Math.floor(Math.random() * 200) + 1500;
-            const mockResponseTime = Math.floor(Math.random() * 25) + 30;
-            document.getElementById("timeInfoMs").innerText = `${mockResponseTime}ms`;
-            
-            logTelemetry(`[CEREBRAS INFERENCE] Gemma 4 parsed current workspace matrix in ${mockResponseTime}ms at ${mockTokenRate} tokens/sec.`);
-            logTelemetry(`[MODEL REPORT] Recalculated Target: ${formatAssetPrice(computedTarget, currentAsset)} // Thesis Rating set to: ${assessedRating}.`);
+            if (typeof patchAuditState === "function") patchAuditState([]);
+            document.getElementById("timeInfoMs").innerText = "local";
         }
+
+        const MAX_LOG_LINES = 500;
 
         function logTelemetry(msg) {
             const logsContainer = document.getElementById("telemetryLogs");
@@ -834,6 +863,9 @@
             line.className = "hover:bg-white/[0.02] py-0.5 px-1 rounded transition-colors";
             line.innerHTML = `<span class="text-gray-600 font-bold">[${timeStr}]</span> <span class="text-sky-300 font-bold">»</span> <span class="text-gray-300">${msg}</span>`;
             logsContainer.appendChild(line);
+            while (logsContainer.children.length > MAX_LOG_LINES) {
+                logsContainer.removeChild(logsContainer.firstChild);
+            }
             logsContainer.scrollTop = logsContainer.scrollHeight;
         }
 
@@ -857,6 +889,14 @@
                 }
             });
             logTelemetry(`[WORKSPACE] User switched active viewport tab view to: ${tabId.toUpperCase()}`);
+            if (tabId === "copilot") {
+                const responseText = document.getElementById("copilotResponseText");
+                const responseBox = document.getElementById("copilotResponseBox");
+                if (responseText && !responseText.textContent?.trim() && typeof showEmptyState === "function") {
+                    responseBox?.classList.remove("hidden");
+                    showEmptyState("copilotResponseText", "Ask a portfolio question to get cross-asset exposure analysis.", "psychology");
+                }
+            }
         }
 
         // SIMULATED SYSTEM ACTIONS
@@ -906,8 +946,8 @@
             
             MOCK_EVENTS.forEach(event => {
                 const item = document.createElement("div");
-                item.className = "p-3 bg-[#111322] rounded-lg border border-gray-800 hover:border-gray-700 cursor-pointer transition-all space-y-2";
-                item.onclick = () => injectLiveEventToSimulator(event);
+                item.className = "p-3 bg-[#111322] rounded-lg border border-gray-800 hover:border-sky-500/50 hover:bg-sky-500/5 cursor-pointer transition-all space-y-2";
+                item.onclick = () => injectLiveEventToSimulator(event, item);
                 
                 let tagColor = event.sentiment === "Bullish" ? "bg-emerald-500/10 text-emerald-400" : (event.sentiment === "Bearish" ? "bg-rose-500/10 text-rose-400" : "bg-gray-800 text-gray-300");
                 
@@ -922,10 +962,9 @@
             });
         }
 
-        function injectLiveEventToSimulator(event) {
+        function injectLiveEventToSimulator(event, cardEl) {
             logTelemetry(`[EVENT INJECTED] Simulating: "${event.text}"`);
-            
-            // Mutate simulator parameters based on injected event
+
             const marginSlider = document.getElementById("simMargins");
             const rateSlider = document.getElementById("simRates");
             const regSlider = document.getElementById("simRegulatory");
@@ -936,7 +975,19 @@
             regSlider.value = Math.min(3, Math.max(1, parseInt(regSlider.value) + event.regulatory));
             sentimentSelect.value = event.sentiment;
 
-            updateSimulator();
+            debouncedUpdateSimulator();
+
+            if (cardEl) {
+                cardEl.classList.add("border-emerald-500/50", "bg-emerald-500/10");
+                const badge = document.createElement("span");
+                badge.className = "text-[9px] text-emerald-400 font-bold flex items-center gap-1 sa-inject-confirm";
+                badge.innerHTML = '<span class="material-icons text-xs">check_circle</span> Injected';
+                cardEl.appendChild(badge);
+                setTimeout(() => {
+                    cardEl.classList.remove("border-emerald-500/50", "bg-emerald-500/10");
+                    badge.remove();
+                }, 1500);
+            }
         }
 
         function submitCopilotQuery() {

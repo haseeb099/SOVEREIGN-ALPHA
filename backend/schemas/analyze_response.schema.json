@@ -66,7 +66,11 @@
           "items": { "type": "number" }
         },
         "rating": { "type": "string", "enum": ["BULLISH", "NEUTRAL", "BEARISH"] },
-        "confidence_score": { "type": "number" }
+        "confidence_score": { "type": "number" },
+        "audit_warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "thesis_points": {

@@ -14,6 +14,7 @@ router = APIRouter()
 # In production, use Redis pub/sub for multi-instance support
 _telemetry_queue: asyncio.Queue = asyncio.Queue()
 _connected_clients: list[WebSocket] = []
+_connect_times: dict[WebSocket, float] = {}
 
 
 async def broadcast_log(event: dict):
@@ -23,8 +24,8 @@ async def broadcast_log(event: dict):
     
     event = {"agent": "FUNDAMENTAL", "message": "...", "ts": 0.2}
     """
-    if not event.get("ts"):
-        event["ts"] = time.time()
+    if "ts" not in event:
+        event["ts"] = 0
 
     dead_clients = []
     for ws in _connected_clients:
@@ -46,12 +47,13 @@ async def telemetry_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     _connected_clients.append(websocket)
+    _connect_times[websocket] = time.time()
 
-    # Send welcome message
+    # Send welcome message (ts=0 — not elapsed seconds)
     await websocket.send_text(json.dumps({
         "agent": "SYSTEM",
         "message": "[SOVEREIGN-ALPHA] WebSocket telemetry stream connected.",
-        "ts": time.time()
+        "ts": 0,
     }))
 
     try:
@@ -61,11 +63,20 @@ async def telemetry_websocket(websocket: WebSocket):
                 # Wait for client message (used as keepalive ping)
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 if data == "ping":
-                    await websocket.send_text(json.dumps({"agent": "SYSTEM", "message": "pong", "ts": time.time()}))
+                    elapsed = round(time.time() - _connect_times.get(websocket, time.time()), 2)
+                    await websocket.send_text(json.dumps({
+                        "agent": "SYSTEM",
+                        "message": "pong",
+                        "ts": elapsed,
+                    }))
             except asyncio.TimeoutError:
-                # Send keepalive
-                await websocket.send_text(json.dumps({"agent": "HEARTBEAT", "message": "alive", "ts": time.time()}))
+                await websocket.send_text(json.dumps({
+                    "agent": "HEARTBEAT",
+                    "message": "alive",
+                    "ts": 0,
+                }))
 
     except WebSocketDisconnect:
         if websocket in _connected_clients:
             _connected_clients.remove(websocket)
+        _connect_times.pop(websocket, None)

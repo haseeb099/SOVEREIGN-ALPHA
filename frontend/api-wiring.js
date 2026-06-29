@@ -13,6 +13,34 @@ const SA = window.SA_CONFIG || {};
 const API_BASE = SA.API_BASE || "http://localhost:8000/api";
 const WS_URL = SA.WS_URL || "ws://localhost:8000/ws/telemetry";
 const HEALTH_URL = SA.HEALTH_URL || "http://localhost:8000/health";
+const MAX_LOG_LINES = 500;
+
+let isAnalyzing = false;
+window._ingestedThesisPointsByAsset = window._ingestedThesisPointsByAsset || {};
+
+function getIngestedThesisPoints(assetKey) {
+  return window._ingestedThesisPointsByAsset[assetKey || currentAsset] || [];
+}
+
+function setIngestedThesisPoints(assetKey, points) {
+  window._ingestedThesisPointsByAsset[assetKey || currentAsset] = points || [];
+  window._ingestedThesisPoints = window._ingestedThesisPointsByAsset[assetKey || currentAsset];
+}
+
+function formatTelemetryTs(ts) {
+  if (ts == null || ts === undefined) return "";
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return "";
+  if (n < 10000) return `(+${n}s)`;
+  return "";
+}
+
+const RATING_TO_DISPLAY = { BULLISH: "BUY", NEUTRAL: "HOLD", BEARISH: "SELL" };
+const RATING_COLORS = {
+  BUY: "text-emerald-400",
+  HOLD: "text-amber-400",
+  SELL: "text-rose-400",
+};
 
 // ─── Error UX (Task 7) ───────────────────────────────────────────────────────
 
@@ -213,7 +241,7 @@ function connectTelemetryWebSocket() {
     try {
       const data = JSON.parse(event.data);
       if (data.agent && data.message && data.agent !== "HEARTBEAT") {
-        logTelemetry(`[${data.agent}] ${data.message} ${data.ts ? `(+${data.ts}s)` : ""}`);
+        logTelemetry(`[${data.agent}] ${data.message} ${formatTelemetryTs(data.ts)}`);
       }
     } catch (e) {}
   };
@@ -241,8 +269,57 @@ window.addEventListener("load", () => {
   setInterval(() => checkBackendHealth(false), 30000);
   connectTelemetryWebSocket();
   bindScenarioPersistence();
-  fetchLiveMarketData(currentAsset);
+  bindFileUpload();
+  bindCopilotTab();
+  if (typeof currentAsset !== "undefined") {
+    fetchLiveMarketData(currentAsset);
+  }
 });
+
+function bindFileUpload() {
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  if (!dropzone || !fileInput) return;
+
+  dropzone.addEventListener("click", (e) => {
+    if (e.target === fileInput) return;
+    fileInput.click();
+  });
+  dropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropzone.classList.add("border-emerald-500", "bg-emerald-500/[0.03]");
+  });
+  dropzone.addEventListener("dragleave", () => {
+    dropzone.classList.remove("border-emerald-500", "bg-emerald-500/[0.03]");
+  });
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("border-emerald-500", "bg-emerald-500/[0.03]");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) window.simulateDocumentUpload(file);
+  });
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) window.simulateDocumentUpload(file);
+    fileInput.value = "";
+  });
+}
+
+function bindCopilotTab() {
+  const origSwitchTab = window.switchTab;
+  if (!origSwitchTab) return;
+  window.switchTab = function(tabId) {
+    origSwitchTab(tabId);
+    if (tabId === "copilot") {
+      const box = document.getElementById("copilotResponseBox");
+      const text = document.getElementById("copilotResponseText");
+      if (box && text && !text.textContent?.trim()) {
+        box.classList.remove("hidden");
+        showEmptyState("copilotResponseText", "Ask a portfolio question to get cross-asset exposure analysis.", "smart_toy");
+      }
+    }
+  };
+}
 
 
 // ─── Live Market Data ────────────────────────────────────────────────────────
@@ -250,20 +327,27 @@ window.addEventListener("load", () => {
 async function fetchLiveMarketData(assetKey) {
   const marketSkeletonIds = ["targetPrice", "targetChange", "targetVolatility"];
   setSkeleton(marketSkeletonIds, true);
+  clearMarketFallbackBadge();
 
   try {
     const resp = await fetch(`${API_BASE}/market/${assetKey}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
+    if (typeof ASSET_INTELLIGENCE_DB !== "undefined" && ASSET_INTELLIGENCE_DB[assetKey]) {
+      ASSET_INTELLIGENCE_DB[assetKey].basePrice = data.price;
+    }
+
     const priceEl = document.getElementById("targetPrice");
     const changeEl = document.getElementById("targetChange");
     const volEl = document.getElementById("targetVolatility");
 
     if (priceEl) {
-      priceEl.textContent = data.price >= 100
-        ? `$${data.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : `$${data.price.toFixed(4)}`;
+      priceEl.textContent = typeof formatAssetPrice === "function"
+        ? formatAssetPrice(data.price, assetKey)
+        : (data.price >= 100
+          ? `$${data.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : `$${data.price.toFixed(4)}`);
     }
 
     if (changeEl) {
@@ -280,6 +364,19 @@ async function fetchLiveMarketData(assetKey) {
       volEl.textContent = `${data.volatility_30d.toFixed(1)}%`;
     }
 
+    if (data.source === "fallback") {
+      showMarketFallbackBadge(data.error);
+      showToast(`Market data for ${assetKey} is stale — using last known price.`, "warning");
+      if (data.error) logTelemetry(`[MARKET] Fallback reason: ${data.error}`);
+    }
+
+    if (typeof updateCasePriceLabels === "function") {
+      updateCasePriceLabels(assetKey);
+    }
+    if (typeof debouncedUpdateSimulator === "function") {
+      debouncedUpdateSimulator();
+    }
+
     logTelemetry(`[MARKET] ${assetKey} live price loaded: $${data.price} (source: ${data.source})`);
     fetchLiveNews(assetKey);
 
@@ -289,6 +386,23 @@ async function fetchLiveMarketData(assetKey) {
   } finally {
     setSkeleton(marketSkeletonIds, false);
   }
+}
+
+function clearMarketFallbackBadge() {
+  const badge = document.getElementById("marketDataBadge");
+  if (badge) badge.remove();
+}
+
+function showMarketFallbackBadge(errorMsg) {
+  clearMarketFallbackBadge();
+  const priceEl = document.getElementById("targetPrice");
+  if (!priceEl?.parentElement) return;
+  const badge = document.createElement("span");
+  badge.id = "marketDataBadge";
+  badge.className = "block text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 mt-1";
+  badge.title = errorMsg || "Using cached market data";
+  badge.textContent = "Stale — last known price";
+  priceEl.parentElement.appendChild(badge);
 }
 
 
@@ -357,7 +471,7 @@ function readScenarioFromDOM() {
   };
 }
 
-function applyScenarioToDOM(scenario) {
+function applyScenarioToDOM(scenario, runSimulator = true) {
   const marginsEl = document.getElementById("simMargins");
   const ratesEl = document.getElementById("simRates");
   const regEl = document.getElementById("simRegulatory");
@@ -368,7 +482,11 @@ function applyScenarioToDOM(scenario) {
   if (regEl) regEl.value = scenario.regulatory;
   if (sentimentEl) sentimentEl.value = scenario.sentiment;
 
-  if (typeof updateSimulator === "function") updateSimulator();
+  if (runSimulator && typeof debouncedUpdateSimulator === "function") {
+    debouncedUpdateSimulator();
+  } else if (runSimulator && typeof updateSimulator === "function") {
+    updateSimulator();
+  }
 }
 
 function persistCurrentAssetScenario() {
@@ -385,11 +503,65 @@ function bindScenarioPersistence() {
 }
 
 
+// ─── Asset hydration (PR1) ───────────────────────────────────────────────────
+
+function updateCasePriceLabels(assetKey) {
+  const assetData = ASSET_INTELLIGENCE_DB?.[assetKey];
+  if (!assetData) return;
+  const bear = assetData.basePrice * 0.75;
+  const base = assetData.basePrice * 1.05;
+  const bull = assetData.basePrice * 1.4;
+  const fmt = (p) => (typeof formatAssetPrice === "function" ? formatAssetPrice(p, assetKey) : `$${p.toFixed(2)}`);
+
+  const bearLbl = document.getElementById("bearCaseLabel");
+  const baseLbl = document.getElementById("baseCaseLabel");
+  const bullLbl = document.getElementById("bullCaseLabel");
+  if (bearLbl) bearLbl.textContent = `Bear Case (${fmt(bear)})`;
+  if (baseLbl) baseLbl.textContent = `Base Case (${fmt(base)})`;
+  if (bullLbl) bullLbl.textContent = `Bull Case (${fmt(bull)})`;
+}
+
+async function loadAssetHistory(assetKey) {
+  try {
+    const resp = await fetch(`${API_BASE}/history/${assetKey}?limit=1`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.items?.[0] || null;
+  } catch (e) {
+    logTelemetry(`[HISTORY] Could not load prior run for ${assetKey}: ${e.message}`);
+    return null;
+  }
+}
+
+async function hydrateAssetUI(assetKey) {
+  const assetData = ASSET_INTELLIGENCE_DB?.[assetKey];
+  if (!assetData) return false;
+
+  const bullEl = document.getElementById("bullVerdict");
+  const bearEl = document.getElementById("bearVerdict");
+  if (bullEl) bullEl.textContent = `"${assetData.bullVerdict}"`;
+  if (bearEl) bearEl.textContent = `"${assetData.bearVerdict}"`;
+
+  updateCasePriceLabels(assetKey);
+  window._ingestedThesisPoints = getIngestedThesisPoints(assetKey);
+
+  const historyItem = await loadAssetHistory(assetKey);
+  if (historyItem) {
+    patchMemoWithAIResponse(historyItem);
+    if (historyItem.thesis_points?.length) {
+      patchThesisTracker(historyItem.thesis_points);
+    }
+    logTelemetry(`[HISTORY] Restored prior analysis for ${assetKey} from cache.`);
+    return true;
+  }
+
+  return false;
+}
+
 // ─── Patch: switchAsset ──────────────────────────────────────────────────────
-// Override the existing prototype function to also load live data
 
 const _originalSwitchAsset = window.switchAsset;
-window.switchAsset = function(assetKey) {
+window.switchAsset = async function(assetKey) {
   if (currentAsset && currentAsset !== assetKey) {
     scenarioState[currentAsset] = readScenarioFromDOM();
     saveScenarioState(scenarioState);
@@ -397,26 +569,39 @@ window.switchAsset = function(assetKey) {
 
   _originalSwitchAsset(assetKey);
 
-  applyScenarioToDOM(scenarioState[assetKey] || { ...DEFAULT_SCENARIO });
+  const hadHistory = await hydrateAssetUI(assetKey);
+  applyScenarioToDOM(scenarioState[assetKey] || { ...DEFAULT_SCENARIO }, !hadHistory);
   fetchLiveMarketData(assetKey);
 };
+
+window.patchAuditState = patchAuditState;
+window.updateCasePriceLabels = updateCasePriceLabels;
+window.patchMemoWithAIResponse = patchMemoWithAIResponse;
 
 
 // ─── Patch: Real AI Analysis ─────────────────────────────────────────────────
 // Override triggerImmediateRecalculation to call real backend
 
 window.triggerImmediateRecalculation = async function() {
-  logTelemetry("[FORCE CYCLE] Sending to Cerebras WSE-3 agent pipeline...");
+  if (isAnalyzing) return;
+  isAnalyzing = true;
 
+  const btn = document.getElementById("forceRecalcBtn");
+  const btnLabel = document.getElementById("forceRecalcLabel");
   const loader = document.getElementById("statusPill");
   const analysisSkeletonIds = ["bullVerdict", "bearVerdict"];
+
+  if (btn) btn.disabled = true;
+  if (btnLabel) btnLabel.textContent = "Running 5-agent pipeline…";
   if (loader) loader.className = "h-2 w-2 rounded-full bg-amber-400 animate-ping";
   setSkeleton(analysisSkeletonIds, true);
+
+  logTelemetry("[FORCE CYCLE] Sending to Cerebras WSE-3 agent pipeline...");
 
   const scenario = {
     margins: parseFloat(document.getElementById("simMargins")?.value || 18.5),
     rates: parseFloat(document.getElementById("simRates")?.value || 4.5),
-    regulatory: ["Low", "Medium", "High"][parseInt(document.getElementById("simRegulatory")?.value || 1) - 1],
+    regulatory: ["Low", "Medium", "High"][parseInt(document.getElementById("simRegulatory")?.value || 1, 10) - 1],
     sentiment: document.getElementById("simSentiment")?.value || "Neutral",
   };
 
@@ -425,8 +610,9 @@ window.triggerImmediateRecalculation = async function() {
       ticker: currentAsset,
       scenario: scenario,
     };
-    if (window._ingestedThesisPoints?.length) {
-      payload.thesis_points = window._ingestedThesisPoints;
+    const thesisPoints = getIngestedThesisPoints(currentAsset);
+    if (thesisPoints.length) {
+      payload.thesis_points = thesisPoints;
     }
 
     const resp = await fetch(`${API_BASE}/analyze`, {
@@ -447,54 +633,166 @@ window.triggerImmediateRecalculation = async function() {
     logTelemetry(
       `[PIPELINE] Complete in ${data.pipeline_elapsed_seconds}s — Rating: ${data.memo?.rating}`
     );
-    showToast(`Analysis complete — ${data.memo?.rating || "done"}`, "success");
+    showToast(`Analysis complete — ${RATING_TO_DISPLAY[data.memo?.rating] || data.memo?.rating || "done"}`, "success");
 
     if (loader) loader.className = "h-2 w-2 rounded-full bg-emerald-500";
 
   } catch (e) {
-    logTelemetry(`[PIPELINE] Error: ${e.message} — falling back to mock data`);
+    logTelemetry(`[PIPELINE] Error: ${e.message}`);
     showToast(`Analysis pipeline failed: ${readableApiError(e)}`, "error");
-    if (typeof updateSimulator === "function") updateSimulator();
-    if (loader) loader.className = "h-2 w-2 rounded-full bg-emerald-500";
+    if (loader) loader.className = "h-2 w-2 rounded-full bg-rose-500";
   } finally {
+    isAnalyzing = false;
+    if (btn) btn.disabled = false;
+    if (btnLabel) btnLabel.textContent = "FORCE RE-CALCULATION";
     setSkeleton(analysisSkeletonIds, false);
   }
 };
 
 
+function mapConfidenceToProbs(confidenceScore) {
+  const health = Math.round(Math.min(100, Math.max(0, (confidenceScore / 10) * 100)));
+  let bullProb = Math.round(health * 0.4);
+  let bearProb = Math.max(5, Math.round((100 - health) * 0.5));
+  let baseProb = 100 - bullProb - bearProb;
+  if (baseProb < 0) {
+    baseProb = 0;
+    const total = bullProb + bearProb;
+    if (total > 100) {
+      bullProb = Math.round((bullProb / total) * 95);
+      bearProb = 100 - bullProb;
+    }
+  }
+  return { health, bullProb, baseProb, bearProb };
+}
+
+function patchAuditState(auditWarnings) {
+  const indicator = document.getElementById("auditStateIndicator");
+  if (!indicator) return;
+
+  const warnings = auditWarnings || [];
+  if (warnings.length > 0) {
+    indicator.textContent = "WARNINGS IN FOOTNOTES";
+    indicator.className = "font-semibold text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px]";
+  } else {
+    indicator.textContent = "CLEAN";
+    indicator.className = "font-semibold text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px]";
+  }
+  updateAuditDetails(warnings);
+}
+
+function updateAuditDetails(auditWarnings) {
+  const details = document.getElementById("auditDetailsBody");
+  if (!details) return;
+
+  const checks = [
+    { field: "Price Target", status: "pass", note: "Within scenario confidence band" },
+    { field: "Rating", status: "pass", note: "Aligned with synthesis agent output" },
+    { field: "Thesis Points", status: "pass", note: "Structural vectors validated" },
+  ];
+
+  if (auditWarnings?.length) {
+    checks.forEach((c) => { c.status = "warn"; });
+  }
+
+  const icon = (s) => (s === "pass" ? "✓" : s === "warn" ? "!" : "✕");
+  const color = (s) => (s === "pass" ? "text-emerald-400" : s === "warn" ? "text-amber-400" : "text-rose-400");
+
+  let html = checks.map((c) => `
+    <div class="flex items-start gap-2 text-[11px]">
+      <span class="${color(c.status)} font-bold">${icon(c.status)}</span>
+      <span><strong>${c.field}:</strong> ${c.note}</span>
+    </div>
+  `).join("");
+
+  if (auditWarnings?.length) {
+    html += `<div class="mt-2 pt-2 border-t border-gray-800 space-y-1">`;
+    auditWarnings.forEach((w) => {
+      html += `<div class="text-[11px] text-amber-400">⚠ ${w}</div>`;
+    });
+    html += `</div>`;
+  }
+
+  details.innerHTML = html;
+}
+
 function patchMemoWithAIResponse(data) {
   const memo = data.memo;
   if (!memo) return;
 
-  // Bull verdict
   const bullEl = document.getElementById("bullVerdict");
-  if (bullEl && memo.bull_verdict) bullEl.textContent = memo.bull_verdict;
+  if (bullEl && memo.bull_verdict) bullEl.textContent = `"${memo.bull_verdict}"`;
 
-  // Bear verdict
   const bearEl = document.getElementById("bearVerdict");
-  if (bearEl && memo.bear_verdict) bearEl.textContent = memo.bear_verdict;
+  if (bearEl && memo.bear_verdict) bearEl.textContent = `"${memo.bear_verdict}"`;
 
-  // Summary
-  const summaryEl = document.getElementById("memoSummary");
-  if (summaryEl && memo.summary) summaryEl.textContent = memo.summary;
+  const memoBody = document.getElementById("memoBody");
+  if (memoBody && memo.summary) {
+    const assetData = ASSET_INTELLIGENCE_DB?.[currentAsset];
+    const ratingDisplay = RATING_TO_DISPLAY[memo.rating] || memo.rating || "HOLD";
+    const targetStr = memo.price_target != null && typeof formatAssetPrice === "function"
+      ? formatAssetPrice(memo.price_target, currentAsset)
+      : `$${Number(memo.price_target || 0).toFixed(2)}`;
 
-  // Price target
-  const targetEl = document.getElementById("priceTarget");
-  if (targetEl && memo.price_target) {
-    targetEl.textContent = `$${memo.price_target.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+    memoBody.innerHTML = `
+      <p class="font-bold text-white text-base mb-2">Executive Summary Target Analysis</p>
+      <p class="mb-3">${memo.summary}</p>
+      <p class="mb-3">Synthesis rating: <strong>${ratingDisplay}</strong> with 12M target <strong>${targetStr}</strong>.</p>
+      <p class="font-semibold text-white mt-4 mb-2">Footnote Integrity & Internal Auditing Trail</p>
+      <p id="memoFootnote">${
+        (memo.audit_warnings?.length)
+          ? `Cross-examination identified ${memo.audit_warnings.length} deviation(s) requiring review.`
+          : "Cross-examination logs verify alignment across primary table values and raw footnotes. No catastrophic deviations identified."
+      }</p>
+      <details class="mt-4 border border-gray-800 rounded-lg overflow-hidden" id="auditDetails">
+        <summary class="cursor-pointer px-4 py-2 bg-[#0c0d14] text-xs font-bold text-gray-300 hover:bg-gray-800/50 transition-colors">
+          Continuous Audit Details
+        </summary>
+        <div class="p-4 space-y-2" id="auditDetailsBody"></div>
+      </details>
+    `;
   }
 
-  // Rating badge
-  const ratingEl = document.getElementById("ratingBadge");
+  const targetEl = document.getElementById("memoTarget");
+  if (targetEl && memo.price_target != null) {
+    targetEl.textContent = typeof formatAssetPrice === "function"
+      ? formatAssetPrice(memo.price_target, currentAsset)
+      : `$${Number(memo.price_target).toFixed(2)}`;
+  }
+
+  const ratingEl = document.getElementById("memoRating");
   if (ratingEl && memo.rating) {
-    const colors = {
-      BULLISH: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-      NEUTRAL: "bg-gray-800 text-gray-300 border-gray-700",
-      BEARISH: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-    };
-    ratingEl.className = `px-2 py-0.5 text-[9px] font-bold rounded border tracking-widest ${colors[memo.rating] || colors.NEUTRAL}`;
-    ratingEl.textContent = memo.rating;
+    const display = RATING_TO_DISPLAY[memo.rating] || memo.rating;
+    ratingEl.textContent = display;
+    ratingEl.className = `text-lg xl:text-2xl font-black ${RATING_COLORS[display] || "text-white"} mt-1 truncate`;
   }
+
+  if (memo.confidence_score != null) {
+    const { health, bullProb, baseProb, bearProb } = mapConfidenceToProbs(memo.confidence_score);
+    const confEl = document.getElementById("memoConfidence");
+    if (confEl) confEl.textContent = `${health}%`;
+
+    const overallHealth = document.getElementById("overallHealth");
+    if (overallHealth) overallHealth.textContent = `${health}%`;
+
+    const probMap = { probBear: bearProb, probBase: baseProb, probBull: bullProb };
+    const barMap = { barBear: bearProb, barBase: baseProb, barBull: bullProb };
+    Object.entries(probMap).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = `${val}%`;
+    });
+    Object.entries(barMap).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.style.width = `${val}%`;
+    });
+  }
+
+  if (data.pipeline_elapsed_seconds != null) {
+    const timeEl = document.getElementById("timeInfoMs");
+    if (timeEl) timeEl.textContent = `${data.pipeline_elapsed_seconds}s`;
+  }
+
+  patchAuditState(memo.audit_warnings);
 }
 
 
@@ -569,25 +867,36 @@ window.simulateDocumentUpload = async function(file) {
       const points = data.extraction?.thesis_points || [];
       logTelemetry(`[INGESTION] Extracted ${points.length} thesis points from ${actualFile.name}`);
 
-      // Store thesis points for next analysis run
-      window._ingestedThesisPoints = points;
+      setIngestedThesisPoints(currentAsset, points);
 
-      // Patch thesis tracker with extracted points
       if (points.length) {
         patchThesisTracker(points);
-        logTelemetry("[INGESTION] Running full pipeline against extracted thesis points...");
-        await window.triggerImmediateRecalculation();
+        logTelemetry("[INGESTION] Thesis points stored — run Force Re-Calculation to analyze.");
       } else {
         showToast("Document parsed but no thesis points were extracted.", "warning");
+      }
+
+      const dropzone = document.getElementById("dropzone");
+      if (dropzone) {
+        const nameEl = dropzone.querySelector(".sa-upload-filename");
+        if (nameEl) nameEl.textContent = actualFile.name;
+        else {
+          const p = document.createElement("p");
+          p.className = "text-[10px] text-emerald-400 mt-2 sa-upload-filename";
+          p.textContent = actualFile.name;
+          dropzone.appendChild(p);
+        }
       }
 
       showToast(`Ingested ${actualFile.name} — ${points.length} thesis point(s) extracted.`, "success");
 
     } catch (e) {
       clearInterval(timer);
-      logTelemetry(`[INGESTION] Upload failed: ${e.message} — running mock simulation`);
+      if (progressContainer) progressContainer.classList.add("hidden");
+      if (valEl) valEl.textContent = "0%";
+      if (barEl) barEl.style.width = "0%";
+      logTelemetry(`[INGESTION] Upload failed: ${e.message}`);
       showToast(`Document upload failed: ${readableApiError(e)}`, "error");
-      _mockIngestionAnimation(valEl, barEl, progressContainer);
     }
 
   } else {
@@ -646,7 +955,7 @@ window.submitCopilotQuery = async function() {
       margins: document.getElementById("simMargins")?.value,
       rates: document.getElementById("simRates")?.value,
       sentiment: document.getElementById("simSentiment")?.value,
-      rating: document.getElementById("ratingBadge")?.textContent || "NEUTRAL",
+      rating: document.getElementById("memoRating")?.textContent?.trim() || "HOLD",
     };
 
     const resp = await fetch(`${API_BASE}/copilot`, {

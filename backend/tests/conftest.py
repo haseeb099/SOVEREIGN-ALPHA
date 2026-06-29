@@ -51,6 +51,7 @@ MEMO_SCHEMA_KEYS = {
     "confidence_band",
     "rating",
     "confidence_score",
+    "audit_warnings",
 }
 
 
@@ -137,6 +138,7 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
                     "threshold": "18%",
                 }
             ],
+            "audit_warnings": [],
             "log_message": "Final synthesis complete — rating: BULLISH",
         }
     return {"agent": "TEST", "log_message": "mock"}
@@ -229,6 +231,7 @@ def sample_pipeline_result(sample_market_data, sample_scenario):
             "confidence_band": [210, 270],
             "rating": "BULLISH",
             "confidence_score": 7.5,
+            "audit_warnings": [],
         },
         "thesis_points": [
             {

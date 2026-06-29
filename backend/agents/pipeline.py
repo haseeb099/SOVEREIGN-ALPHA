@@ -89,6 +89,7 @@ Output ONLY valid JSON with this structure:
   "thesis_points": [
     {"id": 1, "text": "...", "metric": "Margins", "status": "PASS|RISK|FAIL", "current_value": "19.2%", "threshold": "18%"}
   ],
+  "audit_warnings": ["Optional list of integrity warnings, e.g. price target vs scenario mismatch"],
   "log_message": "Final synthesis complete — rating: BULLISH"
 }"""
 
@@ -259,6 +260,7 @@ Red Team Agent Output:\n{json.dumps(results.get('red_team', {}), indent=2)}
             "confidence_band": bull.get("confidence_band", [0, 0]),
             "rating": synthesis.get("rating", "NEUTRAL"),
             "confidence_score": synthesis.get("confidence_score", 5.0),
+            "audit_warnings": synthesis.get("audit_warnings") or [],
         },
         "thesis_points": synthesis.get("thesis_points", thesis_points or []),
         "agent_logs": [],  # Populated via WebSocket, not in REST response

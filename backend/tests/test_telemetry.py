@@ -22,7 +22,10 @@ def test_websocket_connects_and_receives_welcome(ws_client):
 
 def test_websocket_ping_pong(ws_client):
     with ws_client.websocket_connect("/ws/telemetry") as ws:
-        ws.receive_text()  # welcome
+        welcome = json.loads(ws.receive_text())
+        assert welcome["ts"] == 0
         ws.send_text("ping")
         payload = json.loads(ws.receive_text())
         assert payload["message"] == "pong"
+        assert isinstance(payload["ts"], (int, float))
+        assert payload["ts"] < 10000  # elapsed seconds, not unix epoch

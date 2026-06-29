@@ -20,7 +20,9 @@ export default function TerminalLayout({
   return (
     <TerminalProvider>
       <ErrorBoundary>
-        <TerminalLayoutInner>{children}</TerminalLayoutInner>
+        <div className="h-dvh overflow-hidden">
+          <TerminalLayoutInner>{children}</TerminalLayoutInner>
+        </div>
       </ErrorBoundary>
     </TerminalProvider>
   );

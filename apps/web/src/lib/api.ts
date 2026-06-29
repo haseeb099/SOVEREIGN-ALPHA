@@ -378,10 +378,24 @@ export async function importPortfolioCsv(file: File) {
 }
 
 export async function fetchCompareBatch(tickers: string[]) {
-  return apiFetch<{ results: AnalyzeResponse[] }>("/api/analyze/batch", {
-    method: "POST",
-    body: JSON.stringify({ tickers }),
-  });
+  // Batch runs up to 3 analyses in parallel; allow multiple pipeline rounds.
+  const timeoutMs =
+    ANALYZE_TIMEOUT_MS * Math.max(1, Math.ceil(tickers.length / 3));
+  try {
+    const res = await fetchWithTimeout(
+      `${API_BASE}/api/analyze/batch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers }),
+      },
+      timeoutMs,
+    );
+    return await parseJson<{ results: AnalyzeResponse[] }>(res);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw classifyFetchError(err);
+  }
 }
 
 export async function fetchLibraryDocuments() {

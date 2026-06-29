@@ -25,11 +25,15 @@ export function LeftSidebar({
   onToggle,
   className,
   onIngestResult,
+  onTickerSelect,
+  showCollapse = true,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   className?: string;
   onIngestResult?: (extraction: IngestExtraction) => void;
+  onTickerSelect?: () => void;
+  showCollapse?: boolean;
 }) {
   const router = useRouter();
   const { ticker, setTicker, analysis, isAnalyzing, analyze, lastUpdated } =
@@ -43,6 +47,8 @@ export function LeftSidebar({
   const [searching, setSearching] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [recalcState, setRecalcState] = useState<"idle" | "running" | "done">("idle");
 
   const loadAssets = useCallback(() => {
     setAssetsLoading(true);
@@ -75,9 +81,10 @@ export function LeftSidebar({
       setTicker(t);
       setSearch(t);
       setShowSuggestions(false);
+      onTickerSelect?.();
       router.push(`/terminal/${t}/memo`);
     },
-    [router, setTicker],
+    [router, setTicker, onTickerSelect],
   );
 
   const onSearchChange = (value: string) => {
@@ -105,6 +112,7 @@ export function LeftSidebar({
       if (result.extraction?.thesis_points?.length) {
         await analyze();
       }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
     }
@@ -112,8 +120,8 @@ export function LeftSidebar({
 
   if (collapsed) {
     return (
-      <div className={cn("flex w-10 flex-col items-center gap-2 border-r py-2", className)}>
-        <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Expand sidebar">
+      <div className={cn("flex h-full w-9 flex-col items-center border-r border-border py-2", className)}>
+        <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Expand watchlist">
           <PanelLeft />
         </Button>
       </div>
@@ -121,14 +129,19 @@ export function LeftSidebar({
   }
 
   return (
-    <aside className={cn("flex w-64 shrink-0 flex-col border-r bg-card/30", className)}>
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-semibold tracking-wide text-muted-foreground">
-          ASSET DESK
-        </span>
-        <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Collapse sidebar">
-          <PanelLeft />
-        </Button>
+    <aside
+      className={cn(
+        "flex h-full min-h-0 w-full flex-col border-r border-border bg-card/60 xl:w-[240px]",
+        className,
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+        <span className="panel-label">Watchlist</span>
+        {showCollapse && (
+          <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Collapse sidebar">
+            <PanelLeft />
+          </Button>
+        )}
       </div>
       <div className="relative px-3 pb-2">
         <Label htmlFor="ticker-search" className="sr-only">
@@ -146,7 +159,7 @@ export function LeftSidebar({
             }}
             onFocus={() => search.length > 0 && setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-            className="min-h-11 pl-8 font-mono text-xs"
+            className="h-8 pl-8 font-mono text-xs"
             placeholder="Search tickers…"
             autoComplete="off"
           />
@@ -172,7 +185,7 @@ export function LeftSidebar({
           </div>
         )}
       </div>
-      <ScrollArea className="flex-1 px-2">
+      <ScrollArea className="min-h-0 flex-1 px-2">
         <div className="flex flex-col gap-1 pb-2">
           {assetsFallback && (
             <Badge variant="outline" className="mx-1 mb-1 text-[9px] text-status-degraded">
@@ -198,10 +211,10 @@ export function LeftSidebar({
                 type="button"
                 onClick={() => selectTicker(a.key)}
                 className={cn(
-                  "min-h-11 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                  "border-l-2 px-2 py-1.5 text-left text-xs transition-colors",
                   ticker === a.key
-                    ? "bg-primary/15 text-primary"
-                    : "hover:bg-muted",
+                    ? "border-primary bg-primary/5 text-foreground"
+                    : "border-transparent hover:bg-muted/50",
                 )}
               >
                 <div className="font-mono font-semibold">{a.key}</div>
@@ -212,14 +225,14 @@ export function LeftSidebar({
         </div>
       </ScrollArea>
       <Separator />
-      <div className="flex flex-col gap-2 p-3 text-xs">
-        <div className="rounded-md border border-border/60 bg-background/50 p-2">
-          <div className="text-muted-foreground">12M Target</div>
-          <div className="font-mono text-lg">
+      <div className="flex flex-col gap-2 border-t border-border p-3 text-xs">
+        <div className="border border-border bg-background/60 p-2">
+          <div className="panel-label">12M Target</div>
+          <div className="data-metric-lg mt-0.5 text-primary">
             ${analysis?.memo.price_target.toFixed(2) ?? "—"}
           </div>
-          <div className="mt-1 text-muted-foreground">
-            Health {analysis ? computeThesisHealthPct(analysis)?.toFixed(0) : "—"}%
+          <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+            THS {analysis ? computeThesisHealthPct(analysis)?.toFixed(0) : "—"}%
           </div>
           {staleDataLabel(lastUpdated) && (
             <p className="mt-1 text-[10px] text-status-degraded">{staleDataLabel(lastUpdated)}</p>
@@ -228,22 +241,30 @@ export function LeftSidebar({
         <Button
           size="sm"
           onClick={async () => {
+            setRecalcState("running");
             try {
               await analyze();
+              setRecalcState("done");
+              window.setTimeout(() => setRecalcState("idle"), 2000);
             } catch {
-              /* toast handled in provider */
+              setRecalcState("idle");
             }
           }}
           disabled={isAnalyzing}
-          className="min-h-11 w-full"
+          className="h-8 w-full font-mono text-[10px] uppercase"
         >
-          <RefreshCw className={cn(isAnalyzing && "animate-spin")} />
-          {isAnalyzing ? "Analyzing…" : "Force Re-Calculation"}
+          <RefreshCw className={cn((isAnalyzing || recalcState === "running") && "animate-spin")} />
+          {recalcState === "running" || isAnalyzing
+            ? "Running"
+            : recalcState === "done"
+              ? "Complete"
+              : "Recalculate"}
         </Button>
-        <Label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed px-2 py-3 text-muted-foreground hover:bg-muted/50">
+        <Label className="flex h-8 cursor-pointer items-center justify-center gap-2 border border-border px-2 text-[10px] uppercase text-muted-foreground hover:bg-muted/40">
           <FileUp />
           Upload document
           <input
+            ref={fileInputRef}
             type="file"
             className="sr-only"
             accept=".pdf,.txt,.json,.docx"
@@ -268,28 +289,21 @@ export function TerminalTabBar({ ticker }: { ticker: string }) {
   const tabs = [
     { href: `/terminal/${ticker}/memo`, label: "Memo" },
     { href: `/terminal/${ticker}/tracker`, label: "Tracker" },
-    { href: `/terminal/${ticker}/copilot`, label: "Copilot", badge: "AI" },
+    { href: `/terminal/${ticker}/copilot`, label: "Copilot" },
   ];
 
   return (
-    <div className="flex gap-1 border-b border-border/60 px-2">
+    <div className="flex shrink-0 border-b border-border bg-card/40">
       {tabs.map((tab) => (
         <Link
           key={tab.href}
           href={tab.href}
           className={cn(
-            "flex min-h-11 min-w-[4.5rem] flex-1 items-center justify-center rounded-t-md px-3 py-2 text-center text-xs font-medium sm:flex-none sm:min-h-12 sm:px-6",
-            pathname.startsWith(tab.href)
-              ? "border-b-2 border-primary bg-card text-foreground"
-              : "text-muted-foreground hover:text-foreground",
+            "terminal-tab flex-1 sm:flex-none sm:px-6",
+            pathname.startsWith(tab.href) && "terminal-tab-active",
           )}
         >
           {tab.label}
-          {"badge" in tab && tab.badge && (
-            <span className="ml-1 rounded bg-primary/20 px-1 py-0.5 text-[8px] font-bold text-primary">
-              {tab.badge}
-            </span>
-          )}
         </Link>
       ))}
     </div>

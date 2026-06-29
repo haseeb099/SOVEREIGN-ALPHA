@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Trash2 } from "lucide-react";
 import { useTerminal } from "@/providers/terminal-provider";
 import { fetchPortfolioSummary, streamCopilot } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -114,14 +114,30 @@ export function CopilotPanel() {
 
   return (
     <Card className="flex h-full min-h-[24rem] flex-col border-border/60 bg-card/40">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Portfolio Copilot</CardTitle>
-        {ctxLoading ? (
-          <Skeleton className="mt-1 h-3 w-32" />
-        ) : (
-          <p className="text-[10px] text-muted-foreground">
-            Grounded on live portfolio summary
-          </p>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <div>
+          <CardTitle className="text-sm">Portfolio Copilot</CardTitle>
+          {ctxLoading ? (
+            <Skeleton className="mt-1 h-3 w-32" />
+          ) : (
+            <p className="text-[10px] text-muted-foreground">
+              Grounded on live portfolio summary
+            </p>
+          )}
+        </div>
+        {messages.length > 0 && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Clear chat history"
+            onClick={() => {
+              setMessages([]);
+              localStorage.removeItem(copilotStorageKey(ticker));
+              toast.info("Chat history cleared");
+            }}
+          >
+            <Trash2 className="size-4" />
+          </Button>
         )}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-3">

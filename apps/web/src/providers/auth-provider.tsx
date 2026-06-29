@@ -1,36 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
-import { ClerkProvider, useAuth } from "@clerk/nextjs";
-import { setAuthTokenGetter } from "@/lib/api";
+import dynamic from "next/dynamic";
+import type { ReactNode } from "react";
 
-function AuthTokenSync({ children }: { children: React.ReactNode }) {
-  const { getToken, isLoaded } = useAuth();
+const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-  useEffect(() => {
-    if (!isLoaded) return;
-    setAuthTokenGetter(async () => {
-      try {
-        return await getToken();
-      } catch {
-        return null;
-      }
-    });
-  }, [getToken, isLoaded]);
+const ClerkAuthProvider = hasClerk
+  ? dynamic(
+      () =>
+        import("@/providers/clerk-auth-provider").then((m) => m.ClerkAuthProvider),
+      { ssr: false },
+    )
+  : null;
 
-  return <>{children}</>;
-}
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-  if (!publishableKey) {
+export function AuthProvider({ children }: { children: ReactNode }) {
+  if (!ClerkAuthProvider) {
     return <>{children}</>;
   }
-
-  return (
-    <ClerkProvider publishableKey={publishableKey}>
-      <AuthTokenSync>{children}</AuthTokenSync>
-    </ClerkProvider>
-  );
+  return <ClerkAuthProvider>{children}</ClerkAuthProvider>;
 }

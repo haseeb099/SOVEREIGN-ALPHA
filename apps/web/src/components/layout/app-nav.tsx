@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -9,10 +10,17 @@ import {
   LayoutDashboard,
   Settings,
 } from "lucide-react";
-import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 
 const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+const ClerkAuthSlot = hasClerk
+  ? dynamic(
+      () =>
+        import("@/components/layout/clerk-auth-slot").then((m) => m.ClerkAuthSlot),
+      { ssr: false },
+    )
+  : null;
 
 const NAV = [
   { href: "/terminal", label: "Terminal", icon: LayoutDashboard },
@@ -22,27 +30,11 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-function ClerkAuthSlot() {
-  const { isSignedIn, isLoaded } = useAuth();
-  if (!isLoaded) return null;
-  if (isSignedIn) return <UserButton />;
-  return (
-    <SignInButton mode="modal">
-      <button
-        type="button"
-        className="rounded-md px-2.5 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        Sign in
-      </button>
-    </SignInButton>
-  );
-}
-
 export function AppNav({ className }: { className?: string }) {
   const pathname = usePathname();
 
   return (
-    <nav className={cn("flex items-center gap-1", className)}>
+    <nav className={cn("flex items-center gap-0.5", className)}>
       {NAV.map(({ href, label, icon: Icon }) => {
         const active = pathname.startsWith(href);
         return (
@@ -50,19 +42,19 @@ export function AppNav({ className }: { className?: string }) {
             key={href}
             href={href}
             className={cn(
-              "flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-medium transition-colors",
+              "flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wide transition-colors",
               active
                 ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
           >
-            <Icon className="size-4" />
+            <Icon className="size-3.5" />
             <span className="hidden sm:inline">{label}</span>
           </Link>
         );
       })}
-      {hasClerk && (
-        <div className="ml-1 flex items-center border-l border-border/60 pl-2">
+      {hasClerk && ClerkAuthSlot && (
+        <div className="ml-2 flex items-center border-l border-border pl-2">
           <ClerkAuthSlot />
         </div>
       )}
@@ -74,20 +66,23 @@ export function MobileBottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-background/95 backdrop-blur lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-card/95 backdrop-blur lg:hidden">
       {NAV.map(({ href, label, icon: Icon }) => {
         const active = pathname.startsWith(href);
         return (
           <Link
             key={href}
             href={href}
+            title={label}
             className={cn(
-              "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px]",
+              "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 py-2",
               active ? "text-primary" : "text-muted-foreground",
             )}
           >
-            <Icon className="size-5" />
-            {label}
+            <Icon className="size-4 shrink-0" />
+            <span className="hidden max-w-full truncate text-[9px] font-medium uppercase tracking-wide sm:block">
+              {label}
+            </span>
           </Link>
         );
       })}

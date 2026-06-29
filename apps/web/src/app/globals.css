@@ -5,44 +5,45 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.12 0.02 250);
-  --foreground: oklch(0.95 0.01 250);
-  --card: oklch(0.16 0.02 250);
-  --card-foreground: oklch(0.95 0.01 250);
-  --popover: oklch(0.16 0.02 250);
-  --popover-foreground: oklch(0.95 0.01 250);
-  --primary: oklch(0.72 0.14 250);
-  --primary-foreground: oklch(0.12 0.02 250);
-  --secondary: oklch(0.22 0.02 250);
-  --secondary-foreground: oklch(0.95 0.01 250);
-  --muted: oklch(0.22 0.02 250);
-  --muted-foreground: oklch(0.65 0.02 250);
-  --accent: oklch(0.22 0.02 250);
-  --accent-foreground: oklch(0.95 0.01 250);
-  --destructive: oklch(0.65 0.2 25);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.55 0.1 250);
-  --chart-1: oklch(0.72 0.17 155);
-  --chart-2: oklch(0.7 0.12 250);
-  --chart-3: oklch(0.75 0.15 75);
-  --chart-4: oklch(0.65 0.2 25);
-  --chart-5: oklch(0.6 0.05 250);
-  --radius: 0.5rem;
-  --status-live: oklch(0.72 0.17 155);
-  --status-degraded: oklch(0.78 0.14 75);
-  --status-offline: oklch(0.65 0.2 25);
-  --thesis-intact: oklch(0.72 0.17 155);
-  --thesis-weakening: oklch(0.68 0.14 35);
-  --thesis-broken: oklch(0.65 0.2 25);
-  --risk-moderate: oklch(0.7 0.12 250);
+  /* Bloomberg-inspired terminal palette */
+  --background: oklch(0.09 0.008 260);
+  --foreground: oklch(0.88 0.01 260);
+  --card: oklch(0.12 0.01 260);
+  --card-foreground: oklch(0.88 0.01 260);
+  --popover: oklch(0.13 0.012 260);
+  --popover-foreground: oklch(0.88 0.01 260);
+  --primary: oklch(0.78 0.14 75);
+  --primary-foreground: oklch(0.12 0.02 75);
+  --secondary: oklch(0.16 0.012 260);
+  --secondary-foreground: oklch(0.82 0.01 260);
+  --muted: oklch(0.16 0.012 260);
+  --muted-foreground: oklch(0.52 0.015 260);
+  --accent: oklch(0.18 0.015 260);
+  --accent-foreground: oklch(0.88 0.01 260);
+  --destructive: oklch(0.58 0.18 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.78 0.14 75 / 60%);
+  --chart-1: oklch(0.65 0.15 145);
+  --chart-2: oklch(0.72 0.12 75);
+  --chart-3: oklch(0.58 0.18 25);
+  --chart-4: oklch(0.55 0.08 260);
+  --chart-5: oklch(0.48 0.06 260);
+  --radius: 0.25rem;
+  --status-live: oklch(0.65 0.15 145);
+  --status-degraded: oklch(0.72 0.12 75);
+  --status-offline: oklch(0.58 0.18 25);
+  --thesis-intact: oklch(0.65 0.15 145);
+  --thesis-weakening: oklch(0.72 0.12 75);
+  --thesis-broken: oklch(0.58 0.18 25);
+  --risk-moderate: oklch(0.62 0.06 260);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -64,10 +65,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.5);
+  --radius-xl: calc(var(--radius) * 2);
   --color-status-live: var(--status-live);
   --color-status-degraded: var(--status-degraded);
   --color-status-offline: var(--status-offline);
@@ -99,34 +100,126 @@
   }
 }
 
-/* Design polish */
 ::selection {
-  background: oklch(0.55 0.12 250 / 40%);
+  background: oklch(0.78 0.14 75 / 25%);
   color: var(--foreground);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.35 0.02 250) transparent;
+  scrollbar-color: oklch(0.28 0.015 260) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: oklch(0.35 0.02 250);
-  border-radius: 3px;
+  background: oklch(0.28 0.015 260);
+  border-radius: 2px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
+  background: oklch(0.38 0.02 260);
 }
 
 :focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Terminal UI utilities */
+@layer components {
+  .terminal-panel {
+    @apply border border-border bg-card/80;
+  }
+
+  .panel-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .data-metric {
+    @apply font-mono text-sm font-medium tabular-nums tracking-tight;
+  }
+
+  .data-metric-lg {
+    @apply font-mono text-xl font-semibold tabular-nums tracking-tight;
+  }
+
+  .ticker-up {
+    @apply text-thesis-intact;
+  }
+
+  .ticker-down {
+    @apply text-thesis-broken;
+  }
+
+  .terminal-tab {
+    @apply relative flex items-center justify-center border-b-2 border-transparent px-4 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition-colors;
+  }
+
+  .terminal-tab-active {
+    @apply border-primary text-foreground;
+  }
+
+  .terminal-table thead th {
+    @apply border-b border-border bg-muted/40 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+
+  .terminal-table tbody td {
+    @apply border-b border-border/50 px-3 py-2 font-mono text-xs tabular-nums;
+  }
+
+  .terminal-table tbody tr:hover {
+    @apply bg-muted/30;
+  }
+
+  /* ── Terminal workspace grid ── */
+  .terminal-root {
+    --col-left: 240px;
+    --col-right: 280px;
+  }
+
+  .terminal-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  @media (min-width: 1280px) {
+    .terminal-workspace {
+      grid-template-columns: var(--col-left) minmax(0, 1fr) var(--col-right);
+    }
+  }
+
+  .terminal-col-left,
+  .terminal-col-right {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .terminal-col-center {
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  @keyframes macro-ticker-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .macro-ticker-track {
+    animation: macro-ticker-scroll 40s linear infinite;
+    width: max-content;
+  }
+
+  .macro-ticker-track:hover {
+    animation-play-state: paused;
+  }
 }
 
 @keyframes shimmer {
@@ -137,29 +230,18 @@
 .animate-shimmer {
   background: linear-gradient(
     90deg,
-    oklch(0.22 0.02 250) 25%,
-    oklch(0.28 0.02 250) 50%,
-    oklch(0.22 0.02 250) 75%
+    oklch(0.14 0.01 260) 25%,
+    oklch(0.18 0.012 260) 50%,
+    oklch(0.14 0.01 260) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+table thead th {
+  white-space: nowrap;
 }
 
-.animate-fade-in {
-  animation: fade-in-up 0.4s ease-out both;
+table tbody tr {
+  @apply transition-colors;
 }
-
-.animate-fade-in-delay-1 { animation-delay: 0.05s; }
-.animate-fade-in-delay-2 { animation-delay: 0.1s; }
-.animate-fade-in-delay-3 { animation-delay: 0.15s; }

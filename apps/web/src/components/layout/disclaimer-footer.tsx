@@ -1,14 +1,18 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 export function DisclaimerFooter({ className }: { className?: string }) {
+  const pathname = usePathname();
+  if (pathname.startsWith("/terminal")) return null;
+
   return (
     <footer
-      className={`border-t border-border/40 bg-card/20 px-4 py-2 text-center text-[10px] leading-relaxed text-muted-foreground ${className ?? ""}`}
+      className={`border-t border-border bg-card/40 px-4 py-1.5 text-center font-mono text-[9px] leading-relaxed text-muted-foreground ${className ?? ""}`}
     >
       <p>
-        Sovereign-Alpha provides AI-generated research for informational purposes only.
-        Not financial advice. Past performance does not guarantee future results.
-        Market data provided by third-party sources — verify before trading.
+        AI-generated research for informational purposes only. Not financial advice.
+        Verify all market data before trading.
       </p>
     </footer>
   );

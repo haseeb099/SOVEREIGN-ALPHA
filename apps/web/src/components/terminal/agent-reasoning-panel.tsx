@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AnalyzeResponse } from "@sovereign/shared";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Sheet,
   SheetContent,
@@ -39,50 +38,54 @@ export function AgentReasoningPanel({
   verdict,
   agentKey,
   rawAgents,
+  className,
 }: {
   title: string;
   variant: "bull" | "bear";
   verdict: string;
   agentKey: string;
   rawAgents?: AnalyzeResponse["raw_agents"];
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const agent = getAgentData(rawAgents, agentKey);
 
-  const borderClass =
+  const accentClass =
     variant === "bull"
-      ? "border-emerald-500/20 bg-emerald-500/5"
-      : "border-rose-500/20 bg-rose-500/5";
-  const titleClass = variant === "bull" ? "text-emerald-400" : "text-rose-400";
+      ? "border-l-thesis-intact"
+      : "border-l-thesis-broken";
+  const titleClass = variant === "bull" ? "text-thesis-intact" : "text-thesis-broken";
 
   return (
-    <Card className={borderClass}>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
-        <CardTitle className={cn("text-sm", titleClass)}>{title}</CardTitle>
+    <div className={cn("terminal-panel border-l-2", accentClass, className)}>
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <h3 className={cn("font-mono text-[11px] font-semibold uppercase tracking-wide", titleClass)}>
+          {title}
+        </h3>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button variant="ghost" size="sm" className="h-7 text-[10px]">
-                Reasoning
-                <ChevronRight />
+              <Button variant="ghost" size="xs" className="h-6 font-mono text-[9px] uppercase">
+                Detail
+                <ChevronRight className="size-3" />
               </Button>
             }
           />
           <SheetContent side="right" className="w-full sm:max-w-md">
             <SheetHeader>
-              <SheetTitle>{title} — Agent Reasoning</SheetTitle>
+              <SheetTitle className="font-mono text-sm">{title} — Reasoning</SheetTitle>
             </SheetHeader>
             <div className="mt-4 flex flex-col gap-4 text-xs">
               <section>
-                <h4 className="mb-1 font-semibold text-foreground">Verdict</h4>
-                <p className="text-muted-foreground">{agent?.verdict ?? verdict}</p>
+                <h4 className="panel-label mb-1">Verdict</h4>
+                <p className="leading-relaxed text-muted-foreground">{agent?.verdict ?? verdict}</p>
               </section>
               {agent?.citations && agent.citations.length > 0 && (
                   <section>
-                    <h4 className="mb-1 font-semibold text-foreground">Citations</h4>
+                    <h4 className="panel-label mb-1">Citations</h4>
                     <ul className="flex flex-col gap-1">
                       {agent.citations.map((c, i) => (
-                        <li key={`${c.label}-${i}`} className="rounded border px-2 py-1 font-mono">
+                        <li key={`${c.label}-${i}`} className="border border-border px-2 py-1 font-mono text-[11px]">
                           {c.label}: {c.value}
                         </li>
                       ))}
@@ -91,10 +94,10 @@ export function AgentReasoningPanel({
                 )}
               {agent?.factor_weights && (
                 <section>
-                  <h4 className="mb-1 font-semibold text-foreground">Factor Weights</h4>
-                  <ul className="flex flex-col gap-1 font-mono">
+                  <h4 className="panel-label mb-1">Factor Weights</h4>
+                  <ul className="flex flex-col gap-1 font-mono text-[11px]">
                     {Object.entries(agent.factor_weights).map(([k, v]) => (
-                      <li key={k} className="flex justify-between">
+                      <li key={k} className="flex justify-between border-b border-border/50 py-1">
                         <span>{k}</span>
                         <span>{(v * 100).toFixed(0)}%</span>
                       </li>
@@ -104,7 +107,7 @@ export function AgentReasoningPanel({
               )}
               {agent?.documents_referenced && agent.documents_referenced.length > 0 && (
                 <section>
-                  <h4 className="mb-1 font-semibold text-foreground">Documents</h4>
+                  <h4 className="panel-label mb-1">Documents</h4>
                   <ul className="list-inside list-disc text-muted-foreground">
                     {agent.documents_referenced.map((d) => (
                       <li key={d}>{d}</li>
@@ -114,8 +117,8 @@ export function AgentReasoningPanel({
               )}
               {agent?.log_message && (
                 <section>
-                  <h4 className="mb-1 font-semibold text-foreground">Log</h4>
-                  <p className="font-mono text-muted-foreground">{agent.log_message}</p>
+                  <h4 className="panel-label mb-1">Log</h4>
+                  <p className="font-mono text-[11px] text-muted-foreground">{agent.log_message}</p>
                 </section>
               )}
               {agent?.error && (
@@ -123,16 +126,16 @@ export function AgentReasoningPanel({
               )}
                 {!agent && (
                   <p className="text-muted-foreground">
-                    Detailed agent reasoning will appear after the next analysis run.
+                    Detailed reasoning available after the next analysis run.
                   </p>
                 )}
               </div>
             </SheetContent>
           </Sheet>
-      </CardHeader>
-      <CardContent className="text-xs leading-relaxed text-muted-foreground">
+      </div>
+      <p className="px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
         {verdict}
-      </CardContent>
-    </Card>
+      </p>
+    </div>
   );
 }

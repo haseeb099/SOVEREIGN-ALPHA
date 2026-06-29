@@ -2,7 +2,6 @@
 
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export function EmptyState({
@@ -21,21 +20,26 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <Card className={cn("border-dashed", className)}>
-      <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-        {Icon && <Icon className="size-8 text-muted-foreground" />}
-        <div className="space-y-1">
-          <p className="text-sm font-medium">{title}</p>
-          {description && (
-            <p className="max-w-sm text-xs text-muted-foreground">{description}</p>
-          )}
-        </div>
-        {actionLabel && onAction && (
-          <Button size="sm" onClick={onAction}>
-            {actionLabel}
-          </Button>
+    <div
+      className={cn(
+        "terminal-panel flex flex-col items-center gap-3 px-6 py-12 text-center",
+        className,
+      )}
+    >
+      {Icon && <Icon className="size-6 text-muted-foreground" strokeWidth={1.5} />}
+      <div className="space-y-1">
+        <p className="font-mono text-sm font-medium">{title}</p>
+        {description && (
+          <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+      {actionLabel && onAction && (
+        <Button size="sm" className="h-8 font-mono text-[10px] uppercase" onClick={onAction}>
+          {actionLabel}
+        </Button>
+      )}
+    </div>
   );
 }

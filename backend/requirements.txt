@@ -1,0 +1,37 @@
+# Sovereign-Alpha Backend Requirements
+# Install with: pip install -r requirements.txt
+
+# Web Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12         # For file uploads
+
+# AI — Cerebras SDK (Gemma 4 31B)
+cerebras-cloud-sdk==1.19.0
+
+# Market Data
+yfinance==0.2.50
+ccxt==4.4.50                     # Crypto exchange data (Binance, etc.)
+
+# News
+httpx==0.28.0                    # Async HTTP client for NewsAPI
+
+# Document Parsing
+pymupdf==1.24.14                 # PyMuPDF — PDF text extraction (import as fitz)
+
+# Caching
+redis[asyncio]==5.2.0            # Async Redis client
+
+# Data Processing
+pandas==2.2.3
+numpy==1.26.4
+
+# Validation
+pydantic==2.9.2
+
+# Utilities
+python-dotenv==1.0.1             # Load .env file
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0

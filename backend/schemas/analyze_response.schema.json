@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sovereign-alpha.local/schemas/analyze_response.json",
+  "title": "AnalyzeResponse",
+  "description": "Contract for POST /api/analyze — frontend depends on this exact shape.",
+  "type": "object",
+  "required": [
+    "ticker",
+    "timestamp",
+    "asset_price",
+    "asset_change_pct",
+    "volatility_30d",
+    "scenario",
+    "pipeline_elapsed_seconds",
+    "memo",
+    "thesis_points",
+    "agent_logs",
+    "raw_agents"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ticker": {
+      "type": "string",
+      "enum": ["TSLA", "BTC", "XAU", "EUR"]
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "asset_price": { "type": "number" },
+    "asset_change_pct": { "type": "number" },
+    "volatility_30d": { "type": "number" },
+    "scenario": {
+      "type": "object",
+      "required": ["margins", "rates", "regulatory", "sentiment"],
+      "additionalProperties": false,
+      "properties": {
+        "margins": { "type": "number" },
+        "rates": { "type": "number" },
+        "regulatory": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "sentiment": { "type": "string", "enum": ["Bullish", "Neutral", "Bearish"] }
+      }
+    },
+    "pipeline_elapsed_seconds": { "type": "number", "minimum": 0 },
+    "memo": {
+      "type": "object",
+      "required": [
+        "bull_verdict",
+        "bear_verdict",
+        "summary",
+        "price_target",
+        "confidence_band",
+        "rating",
+        "confidence_score"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "bull_verdict": { "type": "string" },
+        "bear_verdict": { "type": "string" },
+        "summary": { "type": "string" },
+        "price_target": { "type": "number" },
+        "confidence_band": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "rating": { "type": "string", "enum": ["BULLISH", "NEUTRAL", "BEARISH"] },
+        "confidence_score": { "type": "number" }
+      }
+    },
+    "thesis_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "metric", "status"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "integer" },
+          "text": { "type": "string" },
+          "metric": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "RISK", "FAIL", "PENDING"] },
+          "current_value": { "type": "string" },
+          "threshold": { "type": "string" }
+        }
+      }
+    },
+    "agent_logs": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "raw_agents": { "type": "object" }
+  }
+}

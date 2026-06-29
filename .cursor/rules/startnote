@@ -1,0 +1,16 @@
+You are working on Sovereign-Alpha — an AI Investment Intelligence OS.
+Repo: e:\Alpha
+Backend: FastAPI + Cerebras (gemma2-31b-it) + Redis + PostgreSQL (pending)
+Frontend: Vanilla HTML/JS/Tailwind in frontend/index.html + api-wiring.js
+Agent pipeline: 5 agents — Fundamental, Macro, Bull, Red Team, Synthesis
+Key files:
+- backend/main.py (FastAPI app, CORS, routers)
+- backend/routers/analyze.py (main analysis endpoint)
+- backend/services/ingest_service.py (PDF ingestion)
+- backend/services/market_service.py (yfinance + ccxt)
+- backend/services/news_service.py (NewsAPI)
+- backend/agents/ (5 agent files)
+- frontend/index.html (980-line Bloomberg UI)
+- frontend/api-wiring.js (patches prototype to real APIs)
+Rules: Always use async/await. Use Pydantic v2. Follow existing patterns.
+Do not change working code unless the task requires it.

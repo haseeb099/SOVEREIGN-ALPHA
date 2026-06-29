@@ -1,0 +1,47 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Connect repo → New Blueprint → point at this file → set secret env vars in dashboard.
+
+services:
+  - type: web
+    name: sovereign-alpha-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: WARNING
+      - key: CEREBRAS_MODEL
+        value: gemma-4-31b
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sovereign-alpha-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sovereign-alpha-redis
+          property: connectionString
+
+  - type: redis
+    name: sovereign-alpha-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+databases:
+  - name: sovereign-alpha-db
+    databaseName: sovereign_alpha
+    user: sovereign
+    plan: free

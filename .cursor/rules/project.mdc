@@ -1,0 +1,120 @@
+# Sovereign-Alpha Cursor Rules
+
+## Project Overview
+This is an AI Investment Intelligence OS called Sovereign-Alpha. It uses:
+- **Backend**: Python 3.11 + FastAPI
+- **AI**: Cerebras SDK with Gemma 4 31B (model string: `gemma2-31b-it`)
+- **Data**: yfinance (stocks/commodities), ccxt (crypto), yfinance `EURUSD=X` (FX)
+- **Frontend**: The existing `frontend/index.html` (vanilla HTML/JS/Tailwind) — extend this, do not rewrite it
+- **Cache**: Redis (TTL 60s for market data)
+- **DB**: PostgreSQL
+
+## Critical Rules
+
+### Never do this:
+- Do NOT use OpenAI SDK — we use Cerebras exclusively
+- Do NOT rewrite `frontend/index.html` from scratch — extend/wire it
+- Do NOT use synchronous blocking calls in FastAPI — always use `async/await`
+- Do NOT hardcode API keys — always use `os.environ.get("KEY_NAME")`
+- Do NOT return plain strings from agent functions — always return structured JSON/dicts
+
+### Always do this:
+- Use `from cerebras.cloud.sdk import Cerebras` for all AI calls
+- Return structured JSON from agents using `response_format={"type": "json_object"}`
+- Cache all market data in Redis with 60-second TTL
+- Log agent events to the telemetry WebSocket queue, not just console
+- Wrap all Cerebras calls in try/except — surface errors cleanly to frontend
+- Validate request payloads with Pydantic models
+
+## File Structure
+```
+sovereign-alpha/
+├── backend/
+│   ├── main.py                    # FastAPI app entry point
+│   ├── agents/
+│   │   ├── pipeline.py            # LangGraph multi-agent orchestrator
+│   │   ├── fundamental_agent.py   # Analyzes financial metrics
+│   │   ├── macro_agent.py         # Cross-references macro environment
+│   │   ├── bull_agent.py          # Builds bull case
+│   │   ├── red_team_agent.py      # Adversarial counter-arguments
+│   │   └── synthesis_agent.py     # Final structured payload
+│   ├── routers/
+│   │   ├── analyze.py             # POST /api/analyze
+│   │   ├── market.py              # GET /api/market/{ticker}
+│   │   ├── ingest.py              # POST /api/ingest
+│   │   ├── copilot.py             # POST /api/copilot (streaming)
+│   │   └── telemetry.py           # WebSocket ws://telemetry
+│   ├── services/
+│   │   ├── market_service.py      # yfinance + ccxt price fetching
+│   │   ├── news_service.py        # NewsAPI integration
+│   │   ├── ingest_service.py      # PDF parsing with PyMuPDF
+│   │   └── cache_service.py       # Redis wrapper
+│   └── requirements.txt
+├── frontend/
+│   └── index.html                 # Existing prototype — wire APIs into this
+├── docs/
+│   └── HANDOFF.md                 # Full project context
+└── .env.example
+```
+
+## JSON Schema Law
+The frontend expects this EXACT shape from `/api/analyze`. Never change field names:
+```json
+{
+  "ticker": "TSLA",
+  "asset_price": 185.20,
+  "asset_change_pct": 2.4,
+  "volatility_30d": 38.4,
+  "memo": {
+    "bull_verdict": "...",
+    "bear_verdict": "...",
+    "summary": "...",
+    "price_target": 220.00,
+    "rating": "BULLISH"
+  },
+  "thesis_points": [
+    {"id": 1, "text": "...", "status": "PASS", "current_value": "19.2%"}
+  ],
+  "agent_logs": [
+    {"agent": "FUNDAMENTAL", "message": "...", "ts": 0.2}
+  ]
+}
+```
+
+## Cerebras Call Pattern
+```python
+from cerebras.cloud.sdk import Cerebras
+import os, json
+
+client = Cerebras(api_key=os.environ["CEREBRAS_API_KEY"])
+
+def call_agent(system_prompt: str, user_message: str) -> dict:
+    response = client.chat.completions.create(
+        model="gemma2-31b-it",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        response_format={"type": "json_object"},
+        max_tokens=1500,
+        temperature=0.3,
+    )
+    return json.loads(response.choices[0].message.content)
+```
+
+## Market Data Tickers
+- TSLA → `yfinance.Ticker("TSLA")`
+- BTC  → `ccxt.binance().fetch_ticker("BTC/USDT")`
+- GOLD → `yfinance.Ticker("GC=F")`
+- EURUSD → `yfinance.Ticker("EURUSD=X")`
+
+## WebSocket Telemetry Pattern
+When adding agents, push log events like this:
+```python
+await telemetry_queue.put({
+    "agent": "FUNDAMENTAL",
+    "message": "Analyzing Q4 margin compression...",
+    "level": "INFO",
+    "ts": time.time()
+})
+```

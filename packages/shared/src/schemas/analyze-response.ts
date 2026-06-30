@@ -240,16 +240,63 @@ export const NLScenarioResponseSchema = z.object({
 });
 export type NLScenarioResponse = z.infer<typeof NLScenarioResponseSchema>;
 
+/** Relaxed thesis point for document ingest — LLM output may omit status. */
+export const IngestThesisPointSchema = z.object({
+  id: z.coerce.number(),
+  text: z.string(),
+  metric: z.string(),
+  status: ThesisStatusSchema.optional().default("PENDING"),
+  current_value: z.string().optional(),
+  threshold: z.string().optional(),
+});
+
+/** LLM JSON often uses null instead of omitting optional fields. */
+const llmOptionalString = z.preprocess(
+  (val) => (val === null || val === undefined ? undefined : val),
+  z.string().optional(),
+);
+
+const llmOptionalNumber = z.preprocess((val) => {
+  if (val === null || val === undefined || val === "") return undefined;
+  const n = typeof val === "number" ? val : Number(val);
+  return Number.isFinite(n) ? n : undefined;
+}, z.number().optional());
+
 export const IngestExtractionSchema = z.object({
-  ticker_guess: z.string().optional(),
-  document_type: z.string().optional(),
-  thesis_points: z.array(ThesisPointSchema).optional(),
+  ticker_guess: llmOptionalString,
+  document_type: llmOptionalString,
+  thesis_points: z.array(IngestThesisPointSchema).optional(),
   key_risks: z.array(z.string()).optional(),
-  target_price: z.number().optional(),
-  rating: z.string().optional(),
+  target_price: llmOptionalNumber,
+  rating: llmOptionalString,
   page_refs: z.record(z.unknown()).optional(),
 });
 export type IngestExtraction = z.infer<typeof IngestExtractionSchema>;
+
+export const WatchlistSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  tickers: z.array(z.string()),
+});
+export type Watchlist = z.infer<typeof WatchlistSchema>;
+
+export const HistoryDiffSchema = z.object({
+  ticker: z.string(),
+  current: z.record(z.unknown()),
+  prior: z.record(z.unknown()),
+  target_delta: z.number(),
+});
+export type HistoryDiff = z.infer<typeof HistoryDiffSchema>;
+
+export const AlertNotificationSchema = z.object({
+  id: z.string(),
+  ticker: z.string(),
+  message: z.string(),
+  channel: z.string(),
+  condition: z.string(),
+  created_at: z.string(),
+});
+export type AlertNotification = z.infer<typeof AlertNotificationSchema>;
 
 export const AlertRuleSchema = z.object({
   id: z.string().optional(),

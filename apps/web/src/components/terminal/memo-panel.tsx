@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Area,
   CartesianGrid,
@@ -14,7 +15,19 @@ import {
 import type { AnalyzeResponse, Memo } from "@sovereign/shared";
 import { fetchMarketHistory } from "@/lib/api";
 import { AgentReasoningPanel } from "@/components/terminal/agent-reasoning-panel";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+
+const HISTORY_RANGES = [
+  { key: "1w", label: "1W", api: "1w" },
+  { key: "1m", label: "1M", api: "1m" },
+  { key: "3m", label: "3M", api: "3m" },
+  { key: "6m", label: "6M", api: "6m" },
+  { key: "1y", label: "1Y", api: "1y" },
+] as const;
+
+type HistoryRange = (typeof HISTORY_RANGES)[number]["key"];
 
 function buildFanData(memo: Memo, spot: number) {
   const dist = memo.distribution;
@@ -53,35 +66,48 @@ function barClose(bar: { close?: number; c?: number; price?: number }): number |
   return typeof v === "number" ? v : null;
 }
 
-export function PriceHistoryChart({ ticker }: { ticker: string }) {
-  const [history, setHistory] = useState<{ label: string; price: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+function formatPriceTick(v: number) {
+  return `$${v.toFixed(0)}`;
+}
 
-  useEffect(() => {
+export function PriceHistoryChart({ ticker }: { ticker: string }) {
+  const [range, setRange] = useState<HistoryRange>("1y");
+  const [history, setHistory] = useState<{ label: string; date: string; price: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiRange = HISTORY_RANGES.find((r) => r.key === range)?.api ?? "1y";
+
+  const loadHistory = useCallback(() => {
     let cancelled = false;
     setLoading(true);
-    setError(false);
-    void fetchMarketHistory(ticker, "1y")
-      .then((bars) => {
+    setError(null);
+    void fetchMarketHistory(ticker, apiRange)
+      .then(({ bars, error: fetchError }) => {
         if (cancelled) return;
         const points = bars
           .map((b, i) => {
             const close = barClose(b);
             if (close == null) return null;
+            const dateStr = typeof b.date === "string" ? b.date : `T-${bars.length - i}`;
             const label =
               typeof b.date === "string"
                 ? b.date.slice(5, 10)
                 : `T-${bars.length - i}`;
-            return { label, price: close };
+            return { label, date: dateStr, price: close };
           })
-          .filter((p): p is { label: string; price: number } => p != null)
-          .slice(-60);
-        setHistory(points);
-        if (points.length === 0) setError(true);
+          .filter((p): p is { label: string; date: string; price: number } => p != null);
+        const sliceCount =
+          range === "1w" ? 7 : range === "1m" ? 22 : range === "3m" ? 66 : range === "6m" ? 126 : 252;
+        setHistory(points.slice(-sliceCount));
+        if (points.length === 0) {
+          setError(fetchError ?? "No price history available");
+        }
       })
-      .catch(() => {
-        if (!cancelled) setError(true);
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load price history");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -89,55 +115,103 @@ export function PriceHistoryChart({ ticker }: { ticker: string }) {
     return () => {
       cancelled = true;
     };
-  }, [ticker]);
+  }, [ticker, apiRange, range]);
+
+  useEffect(() => {
+    return loadHistory();
+  }, [loadHistory]);
+
+  const rangeLabel = HISTORY_RANGES.find((r) => r.key === range)?.label ?? "1Y";
+  const chartLabel = `${ticker} price history chart, ${rangeLabel} range`;
 
   return (
     <div className="terminal-panel">
-      <div className="border-b border-border px-3 py-2">
-        <p className="panel-label">Price History · 1Y</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <p className="panel-label">Price History</p>
+        <div className="flex gap-1" role="tablist" aria-label="Price history range">
+          {HISTORY_RANGES.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              role="tab"
+              aria-selected={range === r.key}
+              className={cn(
+                "rounded px-2 py-0.5 font-mono text-[9px] uppercase transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                range === r.key
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-muted/50",
+              )}
+              onClick={() => setRange(r.key)}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="h-48 p-3">
         {loading ? (
           <Skeleton className="h-full w-full" />
         ) : error || history.length === 0 ? (
-          <p className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            Price history unavailable — connect to live data
-          </p>
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="text-xs text-muted-foreground">
+              {error ?? "Price history unavailable"}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={loadHistory}>
+                Retry
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[10px]"
+                render={<Link href="/settings" />}
+              >
+                Data sources
+              </Button>
+            </div>
+          </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={history} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 6%)" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
-                stroke="oklch(1 0 0 / 10%)"
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
-                stroke="oklch(1 0 0 / 10%)"
-                domain={["auto", "auto"]}
-                tickFormatter={(v: number) => `$${v.toFixed(0)}`}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.12 0.01 260)",
-                  border: "1px solid oklch(1 0 0 / 10%)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                }}
-                formatter={(value) => [`$${Number(value).toFixed(2)}`, "Close"]}
-              />
-              <Line
-                type="monotone"
-                dataKey="price"
-                stroke="oklch(0.78 0.14 75)"
-                strokeWidth={1.5}
-                dot={false}
-                name="Close"
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div role="img" aria-label={chartLabel} className="h-full w-full">
+            <ResponsiveContainer width="100%" height="100%" debounce={50}>
+              <ComposedChart data={history} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 6%)" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
+                  stroke="oklch(1 0 0 / 10%)"
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
+                  stroke="oklch(1 0 0 / 10%)"
+                  domain={["auto", "auto"]}
+                  tickFormatter={formatPriceTick}
+                  width={48}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "oklch(0.12 0.01 260)",
+                    border: "1px solid oklch(1 0 0 / 10%)",
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono)",
+                  }}
+                  labelFormatter={(_, payload) => {
+                    const item = payload?.[0]?.payload as { date?: string } | undefined;
+                    return item?.date ?? "";
+                  }}
+                  formatter={(value) => [`$${Number(value).toFixed(2)}`, "Close"]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="price"
+                  stroke="oklch(0.78 0.14 75)"
+                  strokeWidth={1.5}
+                  dot={false}
+                  name="Close"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
         )}
       </div>
     </div>
@@ -146,35 +220,8 @@ export function PriceHistoryChart({ ticker }: { ticker: string }) {
 
 export function FanChart({ memo, spot, ticker }: { memo: Memo; spot: number; ticker: string }) {
   const fanData = useMemo(() => buildFanData(memo, spot), [memo, spot]);
-  const [history, setHistory] = useState<{ label: string; spot: number }[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingHistory(true);
-    void fetchMarketHistory(ticker, "1y").then((bars) => {
-      if (cancelled) return;
-      const points = bars
-        .map((b, i) => {
-          const close = barClose(b);
-          if (close == null) return null;
-          const label =
-            typeof b.date === "string"
-              ? b.date.slice(0, 7)
-              : `T-${bars.length - i}`;
-          return { label, spot: close };
-        })
-        .filter((p): p is { label: string; spot: number } => p != null)
-        .slice(-24);
-      setHistory(points);
-      setLoadingHistory(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker]);
-
   const hasDistribution = Boolean(memo.distribution);
+  const chartLabel = `${ticker} 12-month probability fan chart, spot $${spot.toFixed(2)}`;
 
   return (
     <div className="terminal-panel">
@@ -188,15 +235,23 @@ export function FanChart({ memo, spot, ticker }: { memo: Memo; spot: number; tic
           )}
         </p>
       </div>
-      <div className="h-56 p-3">
-        {loadingHistory && history.length === 0 ? (
-          <Skeleton className="h-full w-full" />
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={fanData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <div className="min-h-[14rem] min-w-0 w-full overflow-hidden p-3">
+        <div role="img" aria-label={chartLabel}>
+          <ResponsiveContainer width="100%" height={224} debounce={50}>
+            <ComposedChart data={fanData} margin={{ top: 8, right: 8, left: 48, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 6%)" />
-              <XAxis dataKey="month" tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }} stroke="oklch(1 0 0 / 10%)" />
-              <YAxis tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }} stroke="oklch(1 0 0 / 10%)" domain={["auto", "auto"]} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
+                stroke="oklch(1 0 0 / 10%)"
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "oklch(0.52 0.015 260)" }}
+                stroke="oklch(1 0 0 / 10%)"
+                domain={["auto", "auto"]}
+                tickFormatter={formatPriceTick}
+                width={48}
+              />
               <Tooltip
                 contentStyle={{
                   background: "oklch(0.12 0.01 260)",
@@ -204,6 +259,7 @@ export function FanChart({ memo, spot, ticker }: { memo: Memo; spot: number; tic
                   fontSize: 11,
                   fontFamily: "var(--font-mono)",
                 }}
+                formatter={(value) => [`$${Number(value).toFixed(2)}`, ""]}
               />
               <Area
                 type="monotone"
@@ -243,12 +299,7 @@ export function FanChart({ memo, spot, ticker }: { memo: Memo; spot: number; tic
               />
             </ComposedChart>
           </ResponsiveContainer>
-        )}
-        {history.length > 0 && (
-          <p className="mt-1 px-3 pb-2 font-mono text-[10px] text-muted-foreground">
-            Last: ${history[history.length - 1]?.spot.toFixed(2)}
-          </p>
-        )}
+        </div>
       </div>
     </div>
   );

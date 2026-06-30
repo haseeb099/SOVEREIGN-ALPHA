@@ -1,17 +1,23 @@
 import {
+  AlertNotificationSchema,
   AnalyzeResponseSchema,
   HealthHistorySchema,
   HealthResponseSchema,
+  HistoryDiffSchema,
   IngestExtractionSchema,
+  IngestThesisPointSchema,
   MacroEventSchema,
   MarketDataSchema,
   NLScenarioResponseSchema,
   PortfolioSummarySchema,
   ScenarioPreviewResponseSchema,
+  WatchlistSchema,
+  type AlertNotification,
   type AlertRule,
   type AnalyzeResponse,
   type HealthHistory,
   type HealthResponse,
+  type HistoryDiff,
   type Holding,
   type IngestExtraction,
   type MacroEvent,
@@ -21,8 +27,9 @@ import {
   type PriceBar,
   type Scenario,
   type ScenarioPreviewResponse,
+  type Watchlist,
 } from "@sovereign/shared";
-import { ApiError, classifyFetchError } from "@/lib/api-errors";
+import { ApiError, apiErrorFromResponse, classifyFetchError } from "@/lib/api-errors";
 
 const ENV_API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
@@ -63,6 +70,17 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+async function mergeAuthHeaders(
+  init?: RequestInit,
+): Promise<Record<string, string>> {
+  const authHeaders = await getAuthHeaders();
+  return {
+    "Content-Type": "application/json",
+    ...authHeaders,
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+}
+
 export function getApiBase(): string {
   return API_BASE || ENV_API_BASE;
 }
@@ -84,13 +102,20 @@ async function fetchWithTimeout(
   url: string,
   init?: RequestInit,
   timeoutMs = REQUEST_TIMEOUT_MS,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
+  if (externalSignal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener("abort", onExternalAbort);
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -100,11 +125,54 @@ async function parseJson<T>(
 ): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
-    const kind = res.status === 401 ? "auth" : res.status >= 500 ? "server" : "unknown";
-    throw new ApiError(text || `Request failed (${res.status})`, kind, res.status);
+    throw apiErrorFromResponse(text, res.status);
   }
   const data = await res.json();
   return schema ? schema.parse(data) : (data as T);
+}
+
+export function parseIngestExtraction(data: unknown): IngestExtraction {
+  const sanitized =
+    data && typeof data === "object"
+      ? Object.fromEntries(
+          Object.entries(data as Record<string, unknown>).filter(([, v]) => v !== null),
+        )
+      : data;
+  const parsed = IngestExtractionSchema.safeParse(sanitized);
+  if (parsed.success) return parsed.data;
+  const raw = data as Record<string, unknown>;
+  return {
+    ticker_guess: typeof raw.ticker_guess === "string" ? raw.ticker_guess : undefined,
+    rating: typeof raw.rating === "string" ? raw.rating : undefined,
+    key_risks: Array.isArray(raw.key_risks)
+      ? raw.key_risks.filter((r): r is string => typeof r === "string")
+      : undefined,
+    thesis_points: Array.isArray(raw.thesis_points)
+      ? raw.thesis_points
+          .map((tp, i) => {
+            const p = IngestThesisPointSchema.safeParse(tp);
+            if (p.success) return p.data;
+            const item = tp as Record<string, unknown>;
+            if (typeof item.text !== "string" || typeof item.metric !== "string") return null;
+            return {
+              id: Number(item.id ?? i + 1),
+              text: item.text,
+              metric: item.metric,
+              status: "PENDING" as const,
+              current_value:
+                typeof item.current_value === "string" ? item.current_value : undefined,
+              threshold: typeof item.threshold === "string" ? item.threshold : undefined,
+            };
+          })
+          .filter((tp): tp is NonNullable<typeof tp> => tp != null)
+      : undefined,
+    target_price:
+      typeof raw.target_price === "number"
+        ? raw.target_price
+        : raw.target_price != null
+          ? Number(raw.target_price)
+          : undefined,
+  };
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -121,8 +189,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     });
     if (!res.ok) {
       const text = await res.text();
-      const kind = res.status === 401 ? "auth" : res.status >= 500 ? "server" : "unknown";
-      throw new ApiError(text || `Request failed (${res.status})`, kind, res.status);
+      throw apiErrorFromResponse(text, res.status);
     }
     const data = await res.json();
     return data as T;
@@ -147,8 +214,10 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export async function fetchMarket(ticker: string) {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/api/market/${ticker}`, {
     cache: "no-store",
+    headers: authHeaders,
   });
   return parseJson(res, MarketDataSchema);
 }
@@ -171,14 +240,15 @@ export async function fetchMarketSearch(
 export async function fetchMarketHistory(
   ticker: string,
   range = "1y",
-): Promise<PriceBar[]> {
+): Promise<{ bars: PriceBar[]; error?: string }> {
   try {
-    const data = await apiFetch<{ bars: PriceBar[] }>(
+    const data = await apiFetch<{ bars: PriceBar[]; error?: string }>(
       `/api/market/${ticker}/history?range=${range}`,
     );
-    return data.bars ?? [];
-  } catch {
-    return [];
+    return { bars: data.bars ?? [], error: data.error };
+  } catch (e) {
+    const apiError = classifyFetchError(e);
+    return { bars: [], error: apiError.message };
   }
 }
 
@@ -213,7 +283,7 @@ export async function runAnalysis(
       `${API_BASE}/api/analyze`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await mergeAuthHeaders(),
         body: JSON.stringify({
           ticker,
           scenario,
@@ -237,7 +307,7 @@ export async function previewScenario(
   try {
     const res = await fetch(`${API_BASE}/api/scenario/preview`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await mergeAuthHeaders(),
       body: JSON.stringify({ ticker, scenario, base_analysis: baseAnalysis }),
     });
     if (!res.ok) return null;
@@ -250,7 +320,7 @@ export async function previewScenario(
 export async function parseNlScenario(text: string): Promise<NLScenarioResponse> {
   const res = await fetch(`${API_BASE}/api/scenario/nl`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await mergeAuthHeaders(),
     body: JSON.stringify({ text }),
     cache: "no-store",
   });
@@ -313,15 +383,20 @@ export async function streamCopilot(
 export async function ingestDocument(file: File) {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE}/api/ingest`, { method: "POST", body: form });
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/api/ingest`, {
+    method: "POST",
+    headers: authHeaders,
+    body: form,
+  });
   const data = await parseJson<{
     filename: string;
     file_size_kb: number;
-    extraction: IngestExtraction;
+    extraction: unknown;
   }>(res);
   return {
     ...data,
-    extraction: IngestExtractionSchema.parse(data.extraction),
+    extraction: parseIngestExtraction(data.extraction),
   };
 }
 
@@ -346,8 +421,9 @@ export async function fetchPortfolioHoldings(): Promise<Holding[]> {
   try {
     const data = await apiFetch<{ holdings: Holding[] }>("/api/portfolio/holdings");
     return data.holdings ?? [];
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof ApiError && err.kind === "auth") throw err;
+    throw classifyFetchError(err);
   }
 }
 
@@ -367,17 +443,29 @@ export async function savePortfolioHolding(holding: Holding) {
   });
 }
 
+export async function updatePortfolioHolding(
+  holdingId: string,
+  updates: { shares?: number; cost_basis?: number; account_label?: string },
+) {
+  return apiFetch(`/api/portfolio/holdings/${holdingId}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+}
+
 export async function importPortfolioCsv(file: File) {
   const form = new FormData();
   form.append("file", file);
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/api/portfolio/import`, {
     method: "POST",
+    headers: authHeaders,
     body: form,
   });
   return parseJson<{ imported: unknown[]; count: number; holdings?: Holding[] }>(res);
 }
 
-export async function fetchCompareBatch(tickers: string[]) {
+export async function fetchCompareBatch(tickers: string[], signal?: AbortSignal) {
   // Batch runs up to 3 analyses in parallel; allow multiple pipeline rounds.
   const timeoutMs =
     ANALYZE_TIMEOUT_MS * Math.max(1, Math.ceil(tickers.length / 3));
@@ -386,45 +474,55 @@ export async function fetchCompareBatch(tickers: string[]) {
       `${API_BASE}/api/analyze/batch`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await mergeAuthHeaders(),
         body: JSON.stringify({ tickers }),
       },
       timeoutMs,
+      signal,
     );
     return await parseJson<{ results: AnalyzeResponse[] }>(res);
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err;
+    }
     if (err instanceof ApiError) throw err;
     throw classifyFetchError(err);
   }
 }
 
 export async function fetchLibraryDocuments() {
-  const data = await apiFetch<{
-    documents?: {
-      id: string;
-      filename: string;
-      ticker_guess?: string;
-      tags?: string[];
-      uploaded_at?: string;
-      created_at?: string;
-    }[];
-    items?: {
-      id: string;
-      filename: string;
-      ticker_guess?: string;
-      tags?: string[];
-      uploaded_at?: string;
-    }[];
-  }>("/api/library");
-  return data.documents ?? data.items ?? [];
+  try {
+    const data = await apiFetch<{
+      documents?: {
+        id: string;
+        filename: string;
+        ticker_guess?: string;
+        tags?: string[];
+        uploaded_at?: string;
+        created_at?: string;
+      }[];
+      items?: {
+        id: string;
+        filename: string;
+        ticker_guess?: string;
+        tags?: string[];
+        uploaded_at?: string;
+      }[];
+    }>("/api/library");
+    return data.documents ?? data.items ?? [];
+  } catch (err) {
+    if (err instanceof ApiError && err.kind === "auth") throw err;
+    throw classifyFetchError(err);
+  }
 }
 
 export async function fetchAlertRules(): Promise<AlertRule[]> {
   try {
     const data = await apiFetch<{ rules: AlertRule[] }>("/api/alerts/rules");
     return data.rules ?? [];
-  } catch {
-    return [];
+  } catch (err) {
+    if (err instanceof ApiError && err.kind === "auth") throw err;
+    throw classifyFetchError(err);
   }
 }
 
@@ -468,4 +566,93 @@ export async function fetchReport(id: string) {
     analysis: AnalyzeResponseSchema.parse(analysis),
     share_token: data.share_token ?? id,
   };
+}
+
+export async function generateReport(ticker: string, analysis: AnalyzeResponse) {
+  return apiFetch<{
+    id: string;
+    share_token: string;
+    share_url: string;
+    expires_at: string;
+  }>("/api/reports/generate", {
+    method: "POST",
+    body: JSON.stringify({ ticker, analysis }),
+  });
+}
+
+export async function fetchWatchlists(): Promise<Watchlist[]> {
+  const data = await apiFetch<{ watchlists: Watchlist[] }>("/api/watchlists");
+  return (data.watchlists ?? []).map((w) => WatchlistSchema.parse(w));
+}
+
+export async function createWatchlist(name: string, tickers: string[] = []) {
+  const data = await apiFetch<Watchlist>("/api/watchlists", {
+    method: "POST",
+    body: JSON.stringify({ name, tickers }),
+  });
+  return WatchlistSchema.parse(data);
+}
+
+export async function updateWatchlist(watchlistId: string, tickers: string[]) {
+  const data = await apiFetch<Watchlist>(`/api/watchlists/${watchlistId}`, {
+    method: "PUT",
+    body: JSON.stringify({ tickers }),
+  });
+  return WatchlistSchema.parse(data);
+}
+
+export async function deleteWatchlist(watchlistId: string) {
+  return apiFetch<{ deleted: string }>(`/api/watchlists/${watchlistId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchHistoryDiff(ticker: string): Promise<HistoryDiff> {
+  const data = await apiFetch<HistoryDiff>(`/api/history/${ticker}/diff`);
+  return HistoryDiffSchema.parse(data);
+}
+
+export async function fetchAlertNotifications(): Promise<AlertNotification[]> {
+  const data = await apiFetch<{ notifications: AlertNotification[] }>(
+    "/api/alerts/notifications",
+  );
+  return (data.notifications ?? []).map((n) => AlertNotificationSchema.parse(n));
+}
+
+export async function sendReportEmail(reportId: string, to: string) {
+  return apiFetch<{ status: string; detail?: string }>(
+    `/api/reports/${reportId}/send`,
+    {
+      method: "POST",
+      body: JSON.stringify({ to }),
+    },
+  );
+}
+
+export async function downloadReportPdf(
+  token: string,
+): Promise<{ blob: Blob; contentType: string }> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/api/reports/${token}/pdf`, {
+    headers: authHeaders,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw apiErrorFromResponse(text, res.status);
+  }
+  return {
+    blob: await res.blob(),
+    contentType: res.headers.get("Content-Type") ?? "application/pdf",
+  };
+}
+
+export async function fetchFlatfilesStatus() {
+  return apiFetch<{
+    configured: boolean;
+    connected?: boolean;
+    status?: string;
+    detail?: string;
+    known_prefixes?: string[];
+  }>("/api/market/flatfiles/status");
 }

@@ -20,7 +20,7 @@ import {
   type Ticker,
 } from "@sovereign/shared";
 import { previewScenario, runAnalysis } from "@/lib/api";
-import { classifyFetchError, friendlyOfflineToast } from "@/lib/api-errors";
+import { classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { toast } from "sonner";
 
 type TerminalContextValue = {
@@ -35,8 +35,13 @@ type TerminalContextValue = {
   lastUpdated: string | null;
   error: unknown | null;
   isCached: boolean;
+  hydrated: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
   analyze: (force?: boolean) => Promise<void>;
   applyScenarioField: <K extends keyof Scenario>(key: K, value: Scenario[K]) => void;
+  undoScenario: () => void;
+  redoScenario: () => void;
 };
 
 const TerminalContext = createContext<TerminalContextValue | null>(null);
@@ -55,6 +60,14 @@ function loadStoredScenario(ticker: string): Scenario | null {
   }
 }
 
+function persistScenario(ticker: string, scenario: Scenario) {
+  try {
+    localStorage.setItem(scenarioStorageKey(ticker), JSON.stringify(scenario));
+  } catch {
+    /* ignore quota */
+  }
+}
+
 export function TerminalProvider({
   initialTicker = DEFAULT_TICKER,
   children,
@@ -63,10 +76,10 @@ export function TerminalProvider({
   children: ReactNode;
 }) {
   const [ticker, setTicker] = useState(initialTicker.toUpperCase());
-  const [scenario, setScenarioState] = useState<Scenario>(() => {
-    if (typeof window === "undefined") return DEFAULT_SCENARIO;
-    return loadStoredScenario(initialTicker.toUpperCase()) ?? DEFAULT_SCENARIO;
-  });
+  const [scenario, setScenarioState] = useState<Scenario>(DEFAULT_SCENARIO);
+  const [scenarioHistory, setScenarioHistory] = useState<Scenario[]>([DEFAULT_SCENARIO]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [preview, setPreview] = useState<ScenarioPreviewResponse | null>(null);
   const [previewOffline, setPreviewOffline] = useState(false);
@@ -76,49 +89,21 @@ export function TerminalProvider({
   const [isCached, setIsCached] = useState(false);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const analysisRef = useRef<AnalyzeResponse | null>(null);
+  const scenarioRef = useRef<Scenario>(DEFAULT_SCENARIO);
+  const historyIndexRef = useRef(0);
+  const skipHistoryRef = useRef(false);
 
   useEffect(() => {
     analysisRef.current = analysis;
   }, [analysis]);
 
-  const analyze = useCallback(async () => {
-    setIsAnalyzing(true);
-    setError(null);
-    setIsCached(false);
-    try {
-      const result = await runAnalysis(
-        ticker as Ticker,
-        scenario,
-        analysisRef.current?.thesis_points,
-      );
-      setAnalysis(result);
-      setScenarioState(result.scenario);
-      setLastUpdated(result.timestamp);
-      setPreview(null);
-      try {
-        sessionStorage.setItem(`sovereign-analysis-${ticker}`, JSON.stringify(result));
-      } catch {
-        /* ignore quota errors */
-      }
-      toast.success(`Analysis complete for ${ticker}`);
-    } catch (e) {
-      const apiError = classifyFetchError(e);
-      setError(apiError);
-      toast.error(apiError.kind === "offline" ? friendlyOfflineToast() : apiError.message);
-      try {
-        const cached = sessionStorage.getItem(`sovereign-analysis-${ticker}`);
-        if (cached) {
-          setAnalysis(JSON.parse(cached) as AnalyzeResponse);
-          setIsCached(true);
-          toast.info("Showing cached analysis");
-        }
-      } catch {
-        /* ignore */
-      }
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }, [ticker, scenario]);
+  useEffect(() => {
+    scenarioRef.current = scenario;
+  }, [scenario]);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   const debouncedPreview = useCallback(
     (nextScenario: Scenario, base: AnalyzeResponse | null) => {
@@ -146,41 +131,114 @@ export function TerminalProvider({
     [ticker],
   );
 
-  const setScenario = useCallback(
-    (next: Scenario) => {
+  const applyScenario = useCallback(
+    (next: Scenario, recordHistory = true) => {
       setScenarioState(next);
-      try {
-        localStorage.setItem(scenarioStorageKey(ticker), JSON.stringify(next));
-      } catch {
-        /* ignore quota */
+      scenarioRef.current = next;
+      persistScenario(ticker, next);
+
+      if (recordHistory && !skipHistoryRef.current) {
+        setScenarioHistory((prev) => {
+          const base = prev.slice(0, historyIndexRef.current + 1);
+          const updated = [...base, next];
+          historyIndexRef.current = updated.length - 1;
+          return updated;
+        });
+        setHistoryIndex(historyIndexRef.current);
       }
+
       debouncedPreview(next, analysisRef.current);
     },
     [debouncedPreview, ticker],
   );
 
+  const analyze = useCallback(async () => {
+    setIsAnalyzing(true);
+    setError(null);
+    setIsCached(false);
+    const activeScenario = scenarioRef.current;
+    try {
+      const result = await runAnalysis(
+        ticker as Ticker,
+        activeScenario,
+        analysisRef.current?.thesis_points,
+      );
+      setAnalysis(result);
+      skipHistoryRef.current = true;
+      applyScenario(result.scenario, false);
+      skipHistoryRef.current = false;
+      setScenarioHistory([result.scenario]);
+      setHistoryIndex(0);
+      historyIndexRef.current = 0;
+      setLastUpdated(result.timestamp);
+      setPreview(null);
+      try {
+        sessionStorage.setItem(`sovereign-analysis-${ticker}`, JSON.stringify(result));
+      } catch {
+        /* ignore quota errors */
+      }
+      toast.success(`Analysis complete for ${ticker}`);
+    } catch (e) {
+      const apiError = classifyFetchError(e);
+      setError(apiError);
+      toastApiError(apiError, { onRetry: () => void analyze() });
+      try {
+        const cached = sessionStorage.getItem(`sovereign-analysis-${ticker}`);
+        if (cached) {
+          setAnalysis(JSON.parse(cached) as AnalyzeResponse);
+          setIsCached(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [ticker, applyScenario]);
+
+  const setScenario = useCallback(
+    (next: Scenario) => {
+      applyScenario(next, true);
+    },
+    [applyScenario],
+  );
+
   const applyScenarioField = useCallback(
     <K extends keyof Scenario>(key: K, value: Scenario[K]) => {
-      setScenarioState((prev) => {
-        const next = { ...prev, [key]: value };
-        try {
-          localStorage.setItem(scenarioStorageKey(ticker), JSON.stringify(next));
-        } catch {
-          /* ignore quota */
-        }
-        debouncedPreview(next, analysisRef.current);
-        return next;
-      });
+      const next = { ...scenarioRef.current, [key]: value };
+      applyScenario(next, true);
     },
-    [debouncedPreview, ticker],
+    [applyScenario],
   );
+
+  const undoScenario = useCallback(() => {
+    if (historyIndexRef.current <= 0) return;
+    const newIndex = historyIndexRef.current - 1;
+    const prev = scenarioHistory[newIndex];
+    if (!prev) return;
+    skipHistoryRef.current = true;
+    applyScenario(prev, false);
+    skipHistoryRef.current = false;
+    historyIndexRef.current = newIndex;
+    setHistoryIndex(newIndex);
+  }, [applyScenario, scenarioHistory]);
+
+  const redoScenario = useCallback(() => {
+    if (historyIndexRef.current >= scenarioHistory.length - 1) return;
+    const newIndex = historyIndexRef.current + 1;
+    const next = scenarioHistory[newIndex];
+    if (!next) return;
+    skipHistoryRef.current = true;
+    applyScenario(next, false);
+    skipHistoryRef.current = false;
+    historyIndexRef.current = newIndex;
+    setHistoryIndex(newIndex);
+  }, [applyScenario, scenarioHistory]);
 
   useEffect(() => {
     setError(null);
-    const storedScenario = loadStoredScenario(ticker);
-    if (storedScenario) {
-      setScenarioState(storedScenario);
-    }
+    let nextScenario = loadStoredScenario(ticker) ?? DEFAULT_SCENARIO;
+
     try {
       const cached = sessionStorage.getItem(`sovereign-analysis-${ticker}`);
       if (cached) {
@@ -188,15 +246,28 @@ export function TerminalProvider({
         setAnalysis(parsed);
         setIsCached(true);
         setLastUpdated(parsed.timestamp);
-        setScenarioState(parsed.scenario);
+        if (parsed.scenario) nextScenario = parsed.scenario;
       } else {
         setAnalysis(null);
         setIsCached(false);
+        setLastUpdated(null);
       }
     } catch {
       setAnalysis(null);
       setIsCached(false);
+      setLastUpdated(null);
     }
+
+    skipHistoryRef.current = true;
+    setScenarioState(nextScenario);
+    scenarioRef.current = nextScenario;
+    setScenarioHistory([nextScenario]);
+    setHistoryIndex(0);
+    historyIndexRef.current = 0;
+    skipHistoryRef.current = false;
+    setHydrated(true);
+    setPreview(null);
+
     void analyze();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run on ticker change only
   }, [ticker]);
@@ -214,8 +285,13 @@ export function TerminalProvider({
       lastUpdated,
       error,
       isCached,
+      hydrated,
+      canUndo: historyIndex > 0,
+      canRedo: historyIndex < scenarioHistory.length - 1,
       analyze,
       applyScenarioField,
+      undoScenario,
+      redoScenario,
     }),
     [
       ticker,
@@ -227,9 +303,14 @@ export function TerminalProvider({
       lastUpdated,
       error,
       isCached,
+      hydrated,
+      historyIndex,
+      scenarioHistory.length,
       analyze,
       setScenario,
       applyScenarioField,
+      undoScenario,
+      redoScenario,
     ],
   );
 

@@ -125,8 +125,19 @@
 }
 
 :focus-visible {
-  outline: 1px solid var(--ring);
-  outline-offset: 1px;
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible {
+  outline: 2px solid oklch(0.78 0.14 75 / 80%);
+  outline-offset: 2px;
 }
 
 /* Terminal UI utilities */
@@ -188,6 +199,17 @@
     overflow: hidden;
   }
 
+  @media (min-width: 1024px) and (max-width: 1279px) {
+    .terminal-workspace {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .terminal-col-left,
+    .terminal-col-right {
+      display: none;
+    }
+  }
+
   @media (min-width: 1280px) {
     .terminal-workspace {
       grid-template-columns: var(--col-left) minmax(0, 1fr) var(--col-right);
@@ -219,6 +241,51 @@
 
   .macro-ticker-track:hover {
     animation-play-state: paused;
+  }
+
+  .macro-ticker-static {
+    scrollbar-width: thin;
+  }
+
+  .macro-ticker-paused {
+    animation-play-state: paused;
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  @media (max-width: 1023px) {
+    .compare-matrix {
+      display: block;
+    }
+
+    .compare-matrix thead {
+      display: none;
+    }
+
+    .compare-matrix tbody tr {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      border: 1px solid oklch(1 0 0 / 8%);
+      margin-bottom: 0.75rem;
+      padding: 0.75rem;
+      border-radius: 0.25rem;
+    }
+
+    .compare-matrix tbody td {
+      display: flex;
+      justify-content: space-between;
+      border: none;
+      padding: 0.25rem 0;
+    }
+
+    .compare-matrix tbody td::before {
+      content: attr(data-label);
+      font-weight: 500;
+      color: oklch(0.52 0.015 260);
+    }
   }
 }
 

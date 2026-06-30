@@ -48,13 +48,27 @@ async def portfolio_copilot(request: CopilotRequest):
     context_str = ""
     if request.portfolio_context:
         ctx = request.portfolio_context
+        holdings = ctx.get("holdings") or []
+        holdings_count = len(holdings) if isinstance(holdings, list) else 0
+        total_value = ctx.get("total_value", 0)
         context_str = f"""
 Current Portfolio Context:
 - Active Asset: {ctx.get('ticker', 'Unknown')}
 - Price: ${ctx.get('price', 0):,.2f} ({ctx.get('change_pct', 0):+.1f}%)
 - Scenario: Margins={ctx.get('margins', 'N/A')}%, Rates={ctx.get('rates', 'N/A')}%, Sentiment={ctx.get('sentiment', 'N/A')}
 - Current Rating: {ctx.get('rating', 'N/A')}
+- Portfolio Holdings: {holdings_count} position(s), total value ${float(total_value or 0):,.2f}
 """
+        if holdings_count > 0 and isinstance(holdings, list):
+            top = holdings[:5]
+            lines = []
+            for h in top:
+                if isinstance(h, dict):
+                    lines.append(
+                        f"  - {h.get('ticker', '?')}: {h.get('shares', '?')} shares"
+                    )
+            if lines:
+                context_str += "Top holdings:\n" + "\n".join(lines) + "\n"
 
     user_message = f"{context_str}\nUser Question: {request.query}"
 

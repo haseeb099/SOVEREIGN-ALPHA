@@ -14,7 +14,7 @@ from routers.telemetry import broadcast_log
 from routers.alerts import evaluate_rules_for_ticker, evaluate_rules_for_user
 from services.market_service import get_market_data
 from services.persistence_service import save_analysis, save_health_snapshot
-from services.polygon_service import get_earnings_calendar
+from services.polygon_service import get_earnings_overlay
 from services.sovereign_score_service import attach_sovereign_score
 from services.valuation_engine import apply_to_memo
 
@@ -54,7 +54,7 @@ async def _run_analyze(request: AnalyzeRequest, user_id: str | None = None) -> d
     result["memo"] = apply_to_memo(result["memo"], market_data.get("price", 0), bull, red)
     result = attach_sovereign_score(result, market_data)
     result["last_updated"] = result.get("timestamp")
-    earnings = await get_earnings_calendar(request.ticker.upper())
+    earnings = await get_earnings_overlay(request.ticker.upper())
     if earnings:
         result["earnings_overlay"] = earnings
     await save_analysis(request.ticker.upper(), request.scenario.model_dump(), result, user_id=user_id)

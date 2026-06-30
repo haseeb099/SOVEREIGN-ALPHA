@@ -2,15 +2,18 @@
 /api/ingest — Document upload and thesis extraction
 Accepts PDF, TXT, JSON files and returns extracted thesis points.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException
+import hashlib
+import os
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from services.ingest_service import extract_thesis_from_document
-from services.persistence_service import save_ingestion
+from services.persistence_service import find_duplicate_ingestion, save_ingestion
 
 router = APIRouter()
 
 
 @router.post("/ingest")
-async def ingest_document(file: UploadFile = File(...)):
+async def ingest_document(request: Request, file: UploadFile = File(...)):
     """
     Upload an institutional document (10-K, analyst memo, PDF).
     Returns extracted thesis points for the Thesis Tracker™.
@@ -22,7 +25,6 @@ async def ingest_document(file: UploadFile = File(...)):
 
     # Validate file type
     allowed_types = {".pdf", ".txt", ".json", ".docx"}
-    import os
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_types:
         raise HTTPException(
@@ -35,10 +37,33 @@ async def ingest_document(file: UploadFile = File(...)):
     if len(contents) > MAX_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Max 10MB.")
 
+    content_hash = hashlib.sha256(contents).hexdigest()
+    user_id = getattr(request.state, "user_id", None)
+    existing_id = await find_duplicate_ingestion(content_hash, user_id)
+    if existing_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Document already uploaded",
+                "existing_id": existing_id,
+            },
+        )
+
     try:
         result = await extract_thesis_from_document(contents, file.filename or "document")
+        result["content_hash"] = content_hash
         file_size_kb = round(len(contents) / 1024, 1)
-        await save_ingestion(file.filename or "document", file_size_kb, result)
+        doc_id = await save_ingestion(
+            file.filename or "document",
+            file_size_kb,
+            result,
+            user_id=user_id,
+        )
+        if doc_id is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Document extracted but failed to save. Check database migrations (alembic upgrade head).",
+            )
         return {
             "filename": file.filename,
             "file_size_kb": file_size_kb,

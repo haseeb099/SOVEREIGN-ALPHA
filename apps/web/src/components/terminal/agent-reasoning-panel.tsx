@@ -11,6 +11,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { formatFactorLabel } from "@/lib/factor-labels";
 import { cn } from "@/lib/utils";
 
 type AgentData = {
@@ -71,7 +72,7 @@ export function AgentReasoningPanel({
               </Button>
             }
           />
-          <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetContent side="right" className="w-full sm:max-w-md" showCloseButton>
             <SheetHeader>
               <SheetTitle className="font-mono text-sm">{title} — Reasoning</SheetTitle>
             </SheetHeader>
@@ -98,7 +99,7 @@ export function AgentReasoningPanel({
                   <ul className="flex flex-col gap-1 font-mono text-[11px]">
                     {Object.entries(agent.factor_weights).map(([k, v]) => (
                       <li key={k} className="flex justify-between border-b border-border/50 py-1">
-                        <span>{k}</span>
+                        <span>{formatFactorLabel(k)}</span>
                         <span>{(v * 100).toFixed(0)}%</span>
                       </li>
                     ))}
@@ -129,6 +130,14 @@ export function AgentReasoningPanel({
                     Detailed reasoning available after the next analysis run.
                   </p>
                 )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 w-full"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </Button>
               </div>
             </SheetContent>
           </Sheet>

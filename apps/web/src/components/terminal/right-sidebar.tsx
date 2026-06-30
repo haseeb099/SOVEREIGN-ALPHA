@@ -2,10 +2,11 @@
 
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { PanelRight } from "lucide-react";
+import { PanelRight, Loader2 } from "lucide-react";
 import { DEFAULT_SCENARIO } from "@sovereign/shared";
 import { useTerminal } from "@/providers/terminal-provider";
 import { parseNlScenario } from "@/lib/api";
+import { toastApiError } from "@/lib/api-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,16 +64,42 @@ export function RightSidebar({
   onToggle: () => void;
   className?: string;
 }) {
-  const { scenario, analysis, preview, previewOffline, applyScenarioField, setScenario, analyze } =
-    useTerminal();
+  const {
+    scenario,
+    analysis,
+    preview,
+    previewOffline,
+    hydrated,
+    canUndo,
+    canRedo,
+    isAnalyzing,
+    applyScenarioField,
+    setScenario,
+    undoScenario,
+    redoScenario,
+    analyze,
+  } = useTerminal();
   const [nlScenario, setNlScenario] = useState("");
   const [nlParsing, setNlParsing] = useState(false);
   const [nlExplanation, setNlExplanation] = useState<string | null>(null);
+  const [nlError, setNlError] = useState<string | null>(null);
 
   if (collapsed) {
     return (
-      <div className={cn("flex h-full w-9 flex-col items-center border-l border-border py-2", className)}>
-        <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Expand scenario panel">
+      <div
+        className={cn(
+          "relative flex h-full w-9 flex-col items-center border-l border-border py-2",
+          className,
+        )}
+      >
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onToggle}
+          aria-label="Expand scenario panel"
+          title="Scenario lab"
+          className="absolute top-1/2 right-0 z-10 -translate-y-1/2 translate-x-1/2 rounded-l-md border border-border bg-card px-1 shadow-sm"
+        >
           <PanelRight className="size-4" />
         </Button>
       </div>
@@ -83,14 +110,18 @@ export function RightSidebar({
   const baseHealth = computeThesisHealthPct(analysis ?? null);
   const health =
     preview?.thesis_health_pct ??
-    (preview?.confidence_score != null ? confidenceToHealthPct(preview.confidence_score) : undefined) ??
+    (preview?.confidence_score != null
+      ? confidenceToHealthPct(preview.confidence_score)
+      : undefined) ??
     baseHealth;
   const baseTarget = analysis?.memo.price_target;
+  const hasAnalysis = analysis != null;
 
   const applyNlScenario = async () => {
     const text = nlScenario.trim();
     if (!text) return;
     setNlParsing(true);
+    setNlError(null);
     try {
       const result = await parseNlScenario(text);
       const parsed = result.parsed_scenario;
@@ -108,7 +139,9 @@ export function RightSidebar({
       toast.success(result.explanation || "Scenario updated");
       setNlScenario("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Parse failed");
+      const msg = e instanceof Error ? e.message : "Parse failed";
+      setNlError(msg);
+      toastApiError(e, { message: msg });
     } finally {
       setNlParsing(false);
     }
@@ -123,7 +156,14 @@ export function RightSidebar({
     >
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <span className="panel-label">Scenario Lab</span>
-        <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label="Collapse" className="xl:hidden">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onToggle}
+          aria-label="Collapse scenario panel"
+          title="Focus mode"
+          className="xl:inline-flex"
+        >
           <PanelRight className="size-4" />
         </Button>
       </div>
@@ -132,11 +172,17 @@ export function RightSidebar({
         <div className="flex flex-col gap-3 p-3">
           <div className="flex flex-wrap gap-1">
             <DeltaChip label="PT" from={baseTarget} to={preview?.price_target} format={(n) => `$${n.toFixed(0)}`} />
-            <DeltaChip label="THS" from={baseHealth} to={preview?.thesis_health_pct} format={(n) => `${n.toFixed(0)}%`} />
+            <DeltaChip label="Health" from={baseHealth} to={preview?.thesis_health_pct} format={(n) => `${n.toFixed(0)}%`} />
           </div>
 
-          <ScenarioSlider label="Margins" value={scenario.margins} min={5} max={35} step={0.5} suffix="%" onChange={(v) => applyScenarioField("margins", v)} />
-          <ScenarioSlider label="Rates" value={scenario.rates} min={0} max={10} step={0.25} suffix="%" onChange={(v) => applyScenarioField("rates", v)} />
+          {hydrated ? (
+            <>
+              <ScenarioSlider label="Margins" value={scenario.margins} min={5} max={35} step={0.5} suffix="%" onChange={(v) => applyScenarioField("margins", v)} />
+              <ScenarioSlider label="Rates" value={scenario.rates} min={0} max={10} step={0.25} suffix="%" onChange={(v) => applyScenarioField("rates", v)} />
+            </>
+          ) : (
+            <div className="text-[10px] text-muted-foreground">Loading scenario…</div>
+          )}
 
           <Field label="Regulatory">
             <Select value={scenario.regulatory} onValueChange={(v) => applyScenarioField("regulatory", v as Scenario["regulatory"])}>
@@ -160,28 +206,44 @@ export function RightSidebar({
             </Select>
           </Field>
 
-          <div className="border border-border bg-background/50 p-2">
-            <div className="flex items-center justify-between">
-              <span className="panel-label">Preview</span>
-              {previewOffline && (
-                <Badge variant="outline" className="h-4 font-mono text-[8px]">EST</Badge>
-              )}
-            </div>
-            <div className="mt-1 grid grid-cols-2 gap-2">
-              <div>
-                <p className="text-[9px] text-muted-foreground">PT</p>
-                <p className="data-metric text-primary">${target?.toFixed(0) ?? "—"}</p>
+          {hasAnalysis && (
+            <div className="border border-border bg-background/50 p-2">
+              <div className="flex items-center justify-between">
+                <span className="panel-label">Preview</span>
+                {previewOffline && (
+                  <Badge variant="outline" className="h-4 font-mono text-[8px]">EST</Badge>
+                )}
               </div>
-              <div>
-                <p className="text-[9px] text-muted-foreground">THS</p>
-                <p className="data-metric">{health?.toFixed(0) ?? "—"}%</p>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[9px] text-muted-foreground">PT</p>
+                  <p className="data-metric text-primary">${target?.toFixed(0) ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-muted-foreground">Health</p>
+                  <p className="data-metric">{health?.toFixed(0) ?? "—"}%</p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
-            <Button size="sm" variant="secondary" className="h-8 font-mono text-[9px] uppercase" onClick={() => void analyze()}>
-              Run Pipeline
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 font-mono text-[9px] uppercase"
+              disabled={isAnalyzing}
+              onClick={() => void analyze()}
+              aria-label="Run analysis pipeline"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="size-3 animate-spin" />
+                  Running…
+                </>
+              ) : (
+                "Run Pipeline"
+              )}
             </Button>
             <Button
               size="sm"
@@ -190,19 +252,50 @@ export function RightSidebar({
               onClick={() => {
                 setScenario(DEFAULT_SCENARIO);
                 setNlExplanation(null);
+                setNlError(null);
               }}
             >
               Reset
             </Button>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 font-mono text-[9px] uppercase"
+              disabled={!canUndo}
+              onClick={undoScenario}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo scenario change"
+            >
+              Undo
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 font-mono text-[9px] uppercase"
+              disabled={!canRedo}
+              onClick={redoScenario}
+              title="Redo (Ctrl+Y)"
+              aria-label="Redo scenario change"
+            >
+              Redo
+            </Button>
+          </div>
+
           <Field label="NL Scenario">
             <Input
               value={nlScenario}
-              onChange={(e) => setNlScenario(e.target.value)}
+              onChange={(e) => {
+                setNlScenario(e.target.value);
+                setNlError(null);
+              }}
               placeholder="Margins compress 200bps…"
               className="h-8 text-xs"
               onKeyDown={(e) => e.key === "Enter" && void applyNlScenario()}
+              aria-invalid={!!nlError}
+              aria-describedby={nlError ? "nl-scenario-error" : undefined}
             />
             <Button
               variant="outline"
@@ -213,7 +306,12 @@ export function RightSidebar({
             >
               {nlParsing ? "Parsing…" : "Parse & Apply"}
             </Button>
-            {nlExplanation && (
+            {nlError && (
+              <p id="nl-scenario-error" className="mt-1 text-[10px] text-destructive">
+                {nlError}
+              </p>
+            )}
+            {nlExplanation && !nlError && (
               <p className="mt-1 text-[10px] text-muted-foreground">{nlExplanation}</p>
             )}
           </Field>
@@ -268,7 +366,18 @@ function ScenarioSlider({
           if (typeof n === "number") onChange(n);
         }}
         className="py-2"
+        aria-label={`${label} slider`}
       />
+      <div className="flex justify-between font-mono text-[9px] text-muted-foreground">
+        <span>
+          {min}
+          {suffix}
+        </span>
+        <span>
+          {max}
+          {suffix}
+        </span>
+      </div>
     </div>
   );
 }

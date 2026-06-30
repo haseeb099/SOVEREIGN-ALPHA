@@ -65,7 +65,7 @@ async def test_analyze_endpoint_response_satisfies_contract(
         "routers.analyze.run_analysis_pipeline",
         enriched_pipeline,
     )
-    monkeypatch.setattr("routers.analyze.get_earnings_calendar", AsyncMock(return_value=None))
+    monkeypatch.setattr("routers.analyze.get_earnings_overlay", AsyncMock(return_value=None))
 
     resp = await client.post(
         "/api/analyze",

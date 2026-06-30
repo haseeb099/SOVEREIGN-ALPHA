@@ -74,3 +74,40 @@ async def test_json_document_passthrough(mock_cerebras_client, monkeypatch):
         "data.json",
     )
     assert "thesis_points" in result
+
+
+@pytest.mark.asyncio
+async def test_null_target_price_stripped(monkeypatch):
+    """LLM may return target_price: null — must not break ingest."""
+    monkeypatch.setattr("services.ingest_service.CEREBRAS_API_KEY", "mock-key")
+
+    class FakeMessage:
+        content = json.dumps(
+            {
+                "ticker_guess": "TSLA",
+                "thesis_points": [
+                    {"id": 1, "text": "Margins above 18%", "metric": "Margins"},
+                ],
+                "target_price": None,
+                "rating": None,
+            }
+        )
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeCerebras:
+        def __init__(self, api_key=None):
+            self.chat = type("Chat", (), {})()
+            self.chat.completions = type("Completions", (), {})()
+            self.chat.completions.create = lambda **_kwargs: FakeCompletion()
+
+    monkeypatch.setattr("services.ingest_service.Cerebras", FakeCerebras)
+
+    result = await extract_thesis_from_document(LONG_MEMO.encode("utf-8"), "memo.txt")
+    assert "target_price" not in result
+    assert "rating" not in result
+    assert result["ticker_guess"] == "TSLA"

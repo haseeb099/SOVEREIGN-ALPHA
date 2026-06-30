@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Users } from "lucide-react";
 
-type CommunityCard = { ticker: string; score: number; summary: string };
+type CommunityCard = { ticker: string; score: number; summary: string; change_7d?: number };
 
 export default function CommunityPage() {
   const [cards, setCards] = useState<CommunityCard[]>([]);
@@ -92,9 +92,24 @@ export default function CommunityPage() {
               >
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="font-mono text-base">{c.ticker}</CardTitle>
-                  <Badge variant="outline" className="font-mono text-status-live">
-                    {c.score}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    {c.change_7d != null && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          c.change_7d >= 0
+                            ? "font-mono text-thesis-intact"
+                            : "font-mono text-thesis-broken"
+                        }
+                      >
+                        {c.change_7d >= 0 ? "+" : ""}
+                        {c.change_7d.toFixed(1)}% 7d
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="font-mono text-status-live">
+                      {c.score}
+                    </Badge>
+                  </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
                   <p className="text-sm leading-relaxed text-muted-foreground">{c.summary}</p>

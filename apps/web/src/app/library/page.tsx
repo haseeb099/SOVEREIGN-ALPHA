@@ -5,7 +5,9 @@ import Link from "next/link";
 import { BookOpen, ExternalLink, FileText, FileUp, Trash2 } from "lucide-react";
 import type { IngestExtraction } from "@sovereign/shared";
 import { deleteLibraryDocument, fetchLibraryDocuments, ingestDocument } from "@/lib/api";
-import { classifyFetchError } from "@/lib/api-errors";
+import { authRequiredMessage, ApiError, classifyFetchError, toastApiError } from "@/lib/api-errors";
+import { AuthGate } from "@/components/auth/auth-gate";
+import { useSystemHealth } from "@/hooks/use-system-health";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { ApiErrorState } from "@/components/ui/api-error-state";
@@ -15,7 +17,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 type Doc = {
   id: string;
@@ -95,39 +107,89 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown | null>(null);
   const [lastExtraction, setLastExtraction] = useState<IngestExtraction | null>(null);
+  const [uploadQueue, setUploadQueue] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { health } = useSystemHealth();
 
-  const refresh = async () => {
+  const cerebrasDown =
+    health?.subsystems?.cerebras?.status &&
+    health.subsystems.cerebras.status !== "ok" &&
+    health.subsystems.cerebras.status !== "online";
+
+  const refresh = async (options?: { suppressErrorToast?: boolean }): Promise<void> => {
     setLoading(true);
     setLoadError(null);
+    setAuthError(false);
     try {
       setDocs(await fetchLibraryDocuments());
     } catch (e) {
-      setLoadError(classifyFetchError(e));
-      setDocs([]);
+      const err = classifyFetchError(e);
+      if (err.kind === "auth") {
+        setAuthError(true);
+        setDocs([]);
+      } else {
+        setLoadError(err);
+        setDocs([]);
+        if (!options?.suppressErrorToast) {
+          toastApiError(err, {
+            message: "Document registry is temporarily unavailable.",
+          });
+        }
+      }
+      throw err;
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch(() => {});
   }, []);
 
-  const onUpload = async (file: File) => {
+  const processUploadQueue = async (files: File[]) => {
+    const valid = files.filter((f) => {
+      if (f.size > MAX_UPLOAD_BYTES) {
+        toast.error(`${f.name} exceeds 10 MB limit`);
+        return false;
+      }
+      return true;
+    });
+    if (!valid.length) return;
     setUploading(true);
-    try {
-      const result = await ingestDocument(file);
-      setLastExtraction(result.extraction);
-      toast.success(`Ingested ${result.filename}`);
-      await refresh();
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
+    setUploadQueue(valid.map((f) => ({ name: f.name, status: "pending" as const })));
+    for (let i = 0; i < valid.length; i++) {
+      const file = valid[i]!;
+      try {
+        const result = await ingestDocument(file);
+        setLastExtraction(result.extraction);
+        setUploadQueue((q) =>
+          q.map((item, idx) => (idx === i ? { ...item, status: "done" } : item)),
+        );
+        toast.success(`Ingested ${result.filename}`);
+      } catch (e) {
+        setUploadQueue((q) =>
+          q.map((item, idx) => (idx === i ? { ...item, status: "error" } : item)),
+        );
+        const err = classifyFetchError(e);
+        if (err instanceof ApiError && err.status === 409) {
+          toast.error(`${file.name} already uploaded`);
+        } else {
+          toastApiError(err, { message: `Failed: ${file.name}` });
+        }
+      }
     }
+    await refresh();
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setUploading(false);
+    window.setTimeout(() => setUploadQueue([]), 3000);
+  };
+
+  const onUpload = async (file: File) => {
+    await processUploadQueue([file]);
   };
 
   const thesisDocCount = docs.filter((d) => d.ticker_guess).length;
@@ -136,10 +198,19 @@ export default function LibraryPage() {
     <DashboardShell
       title="Library"
       subtitle="Research documents — extract thesis points and link to terminal"
-      onRefresh={() => void refresh()}
+      onRefresh={() => refresh({ suppressErrorToast: true })}
       refreshing={loading}
     >
       <div className="flex flex-col gap-6">
+        {cerebrasDown && (
+          <Card className="border-status-degraded/40 bg-status-degraded/10">
+            <CardContent className="py-3 text-xs text-status-degraded">
+              Document extraction unavailable — CEREBRAS_API_KEY is missing or invalid. Text
+              uploads require AI extraction; check backend health and .env configuration.
+            </CardContent>
+          </Card>
+        )}
+        <AuthGate show={authError}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard
             label="Documents"
@@ -160,13 +231,24 @@ export default function LibraryPage() {
             hint={
               lastExtraction?.thesis_points?.length
                 ? `${lastExtraction.thesis_points.length} thesis points`
-                : "Upload to extract"
+                : undefined
             }
             loading={false}
             variant={lastExtraction ? "live" : "default"}
           />
         </div>
+        {!lastExtraction && (
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto self-start p-0 text-xs"
+            onClick={() => dropzoneRef.current?.scrollIntoView({ behavior: "smooth" })}
+          >
+            Upload to extract →
+          </Button>
+        )}
 
+        <div ref={dropzoneRef}>
         <Card className="border-border/60 bg-card/40">
           <CardHeader>
             <CardTitle className="text-sm">Upload research</CardTitle>
@@ -177,21 +259,47 @@ export default function LibraryPage() {
               <span className="font-medium text-foreground">
                 {uploading ? "Uploading…" : "Drop or click to upload"}
               </span>
-              <span className="text-[10px]">PDF, TXT, JSON, DOCX</span>
+              <span className="text-[10px]">PDF, TXT, JSON, DOCX · max 10 MB</span>
               <input
                 ref={fileInputRef}
                 type="file"
                 className="sr-only"
                 accept=".pdf,.txt,.json,.docx"
+                multiple
                 disabled={uploading}
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void onUpload(f);
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void processUploadQueue(files);
                 }}
               />
             </Label>
+            {uploading && (
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-2/3 animate-pulse bg-primary" />
+              </div>
+            )}
+            {uploadQueue.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1 text-[10px]">
+                {uploadQueue.map((item) => (
+                  <li key={item.name} className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono">{item.name}</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[9px]",
+                        item.status === "done" && "text-status-live",
+                        item.status === "error" && "text-destructive",
+                      )}
+                    >
+                      {item.status}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
+        </div>
 
         {lastExtraction && <ExtractionPanel extraction={lastExtraction} />}
 
@@ -255,16 +363,8 @@ export default function LibraryPage() {
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            onClick={async () => {
-                              try {
-                                await deleteLibraryDocument(d.id);
-                                toast.success("Document deleted");
-                                await refresh();
-                              } catch (e) {
-                                toast.error(e instanceof Error ? e.message : "Delete failed");
-                              }
-                            }}
-                            aria-label="Delete document"
+                            onClick={() => setDeleteTarget(d)}
+                            aria-label={`Delete ${d.filename}`}
                           >
                             <Trash2 />
                           </Button>
@@ -277,6 +377,39 @@ export default function LibraryPage() {
             )}
           </CardContent>
         </Card>
+        </AuthGate>
+
+        <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete document?</DialogTitle>
+            </DialogHeader>
+            <p className="text-xs text-muted-foreground">
+              Remove {deleteTarget?.filename} from the registry. This cannot be undone.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  if (!deleteTarget) return;
+                  try {
+                    await deleteLibraryDocument(deleteTarget.id);
+                    toast.success("Document deleted");
+                    setDeleteTarget(null);
+                    await refresh();
+                  } catch (e) {
+                    toastApiError(e, { message: "Delete failed" });
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardShell>
   );

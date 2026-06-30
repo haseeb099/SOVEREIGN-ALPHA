@@ -19,3 +19,19 @@ export function upsidePct(spot: number, target: number): number {
   if (!spot || spot <= 0) return 0;
   return ((target - spot) / spot) * 100;
 }
+
+export function formatTimestamp(
+  iso: string | null | undefined,
+  opts?: { showDate?: boolean; showTz?: boolean },
+): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  const showDate = opts?.showDate !== false;
+  return date.toLocaleString(undefined, {
+    ...(showDate ? { month: "short", day: "numeric" } : {}),
+    hour: "numeric",
+    minute: "2-digit",
+    ...(opts?.showTz ? { timeZoneName: "short" } : {}),
+  });
+}

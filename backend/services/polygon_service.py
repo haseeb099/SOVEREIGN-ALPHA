@@ -251,18 +251,64 @@ async def _yfinance_history(symbol: str, days: int) -> list[dict[str, Any]]:
         return []
 
 
-async def get_earnings_calendar(ticker: str) -> Optional[dict[str, Any]]:
-    if not POLYGON_API_KEY:
-        return None
+async def get_earnings_calendar(ticker: str) -> list[dict[str, Any]]:
+    """Earnings events for a ticker — Polygon primary, yfinance fallback, [] when unavailable."""
+    symbol = ticker.upper()
+    if POLYGON_API_KEY:
+        try:
+            payload = await _polygon_get(
+                "/vX/reference/financials",
+                {"ticker": symbol, "limit": 4},
+            )
+            results = payload.get("results") or []
+            if results:
+                return [
+                    {
+                        "source": "polygon",
+                        "ticker": symbol,
+                        "fiscal_period": r.get("fiscal_period"),
+                        "fiscal_year": r.get("fiscal_year"),
+                        "start_date": r.get("start_date"),
+                        "end_date": r.get("end_date"),
+                        "raw": r,
+                    }
+                    for r in results
+                ]
+        except Exception as exc:
+            logger.debug("Polygon earnings lookup failed for %s: %s", symbol, exc)
+
+    return await _yfinance_earnings(symbol)
+
+
+async def _yfinance_earnings(ticker: str) -> list[dict[str, Any]]:
+    """Best-effort earnings dates via yfinance."""
     try:
-        payload = await _polygon_get(
-            "/vX/reference/financials",
-            {"ticker": ticker.upper(), "limit": 1},
-        )
-        results = payload.get("results") or []
-        if not results:
-            return None
-        return {"ticker": ticker.upper(), "next_earnings": results[0]}
+        import yfinance as yf
+
+        info = await asyncio.to_thread(lambda: yf.Ticker(ticker).calendar)
+        if not info or not isinstance(info, dict):
+            return []
+        events: list[dict[str, Any]] = []
+        earnings_date = info.get("Earnings Date")
+        if earnings_date is not None:
+            dates = earnings_date if isinstance(earnings_date, list) else [earnings_date]
+            for d in dates:
+                events.append(
+                    {
+                        "source": "yfinance",
+                        "ticker": ticker,
+                        "earnings_date": str(d),
+                    }
+                )
+        return events
     except Exception as exc:
-        logger.debug("Polygon earnings lookup failed for %s: %s", ticker, exc)
+        logger.debug("yfinance earnings lookup failed for %s: %s", ticker, exc)
+        return []
+
+
+async def get_earnings_overlay(ticker: str) -> Optional[dict[str, Any]]:
+    """Compact earnings overlay for analyze pipeline."""
+    events = await get_earnings_calendar(ticker)
+    if not events:
         return None
+    return {"ticker": ticker.upper(), "next_earnings": events[0], "events": events}

@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 CLERK_JWKS_URL = os.environ.get("CLERK_JWKS_URL", "")
 CLERK_ISSUER = os.environ.get("CLERK_ISSUER", "")
+DEV_LOCAL_USER = "dev-local-user"
+
+
+def dev_auth_enabled() -> bool:
+    """Local dev without Clerk — attach a stable demo user so CRUD routes work."""
+    return (
+        os.environ.get("ENVIRONMENT", "development") == "development"
+        and not os.environ.get("CLERK_SECRET_KEY", "")
+    )
 
 _jwks_cache: dict | None = None
 
@@ -93,12 +102,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
         request.state.user_id = extract_user_id(request)
+        if not request.state.user_id and dev_auth_enabled():
+            request.state.user_id = DEV_LOCAL_USER
         return await call_next(request)
+
+
+def resolve_user_id(request: Request) -> Optional[str]:
+    """Resolve authenticated user id from request state or Authorization header."""
+    user_id = getattr(request.state, "user_id", None)
+    if user_id:
+        return user_id
+    return extract_user_id(request)
 
 
 def require_auth(request: Request) -> str:
     """Dependency helper — raises 401 if no authenticated user."""
-    user_id = getattr(request.state, "user_id", None)
+    user_id = resolve_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user_id

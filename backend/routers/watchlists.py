@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from middleware.auth import extract_user_id
+from middleware.auth import resolve_user_id, require_auth
 from models import Watchlist
 
 router = APIRouter()
@@ -22,10 +22,7 @@ class WatchlistUpdate(BaseModel):
 
 
 def _require_user(request: Request) -> str:
-    user_id = extract_user_id(request) or getattr(request.state, "user_id", None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return user_id
+    return require_auth(request)
 
 
 @router.get("/watchlists")
@@ -52,6 +49,25 @@ async def create_watchlist(request: Request, body: WatchlistCreate):
             tickers=[t.upper() for t in body.tickers],
         )
         session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return {"id": str(row.id), "name": row.name, "tickers": row.tickers}
+
+
+@router.put("/watchlists/{watchlist_id}")
+async def update_watchlist(request: Request, watchlist_id: str, body: WatchlistUpdate):
+    user_id = _require_user(request)
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(Watchlist).where(
+                    Watchlist.id == uuid.UUID(watchlist_id), Watchlist.user_id == user_id
+                )
+            )
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Watchlist not found")
+        row.tickers = [t.upper() for t in body.tickers]
         await session.commit()
         await session.refresh(row)
         return {"id": str(row.id), "name": row.name, "tickers": row.tickers}

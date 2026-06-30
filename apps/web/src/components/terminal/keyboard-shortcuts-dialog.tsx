@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 
 const SHORTCUTS = [
+  { keys: "Alt+T", description: "Open thesis tracker tab" },
   { keys: "S", description: "Toggle Scenario Lab panel" },
   { keys: "?", description: "Show keyboard shortcuts" },
   { keys: "Enter", description: "Search / submit ticker in asset desk" },

@@ -1,20 +1,25 @@
 import type { LucideIcon } from "lucide-react";
+import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function KpiCard({
   label,
   value,
   hint,
+  infoHint,
   icon: Icon,
   loading,
+  loadingLabel = "Loading…",
   variant = "default",
   className,
 }: {
   label: string;
   value: string;
   hint?: string;
+  infoHint?: string;
   icon?: LucideIcon;
   loading?: boolean;
+  loadingLabel?: string;
   variant?: "default" | "live" | "warn";
   className?: string;
 }) {
@@ -35,9 +40,17 @@ export function KpiCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="panel-label">{label}</p>
+          <p className="panel-label flex items-center gap-1">
+            {label}
+            {infoHint && (
+              <abbr title={infoHint} className="cursor-help no-underline">
+                <Info className="size-3 text-muted-foreground" aria-hidden />
+                <span className="sr-only">{infoHint}</span>
+              </abbr>
+            )}
+          </p>
           {loading ? (
-            <div className="mt-2 h-7 w-24 animate-shimmer rounded-sm" />
+            <p className="data-metric-lg mt-1 truncate text-muted-foreground">{loadingLabel}</p>
           ) : (
             <p className="data-metric-lg mt-1 truncate">{value}</p>
           )}

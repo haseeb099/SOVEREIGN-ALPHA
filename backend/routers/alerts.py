@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from middleware.auth import extract_user_id
+from middleware.auth import require_auth
 from models import AlertRule, ThesisHealthSnapshot
 from services.market_service import get_market_data
 
@@ -27,10 +27,7 @@ class AlertRuleCreate(BaseModel):
 
 
 def _require_user(request: Request) -> str:
-    user_id = extract_user_id(request) or getattr(request.state, "user_id", None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return user_id
+    return require_auth(request)
 
 
 @router.get("/alerts/rules")

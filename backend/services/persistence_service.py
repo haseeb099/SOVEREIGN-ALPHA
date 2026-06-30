@@ -72,6 +72,27 @@ async def save_health_snapshot(
         return None
 
 
+async def find_duplicate_ingestion(
+    content_hash: str,
+    user_id: Optional[str] = None,
+) -> Optional[str]:
+    """Return existing document id if same content hash was already ingested."""
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = select(IngestedDocument).order_by(IngestedDocument.created_at.desc())
+            rows = (await session.execute(stmt)).scalars().all()
+            for row in rows:
+                extraction = row.extraction or {}
+                if extraction.get("content_hash") != content_hash:
+                    continue
+                if user_id and row.user_id and row.user_id != user_id:
+                    continue
+                return str(row.id)
+    except Exception as e:
+        logger.warning("Duplicate check failed: %s", e)
+    return None
+
+
 async def save_ingestion(
     filename: str,
     file_size_kb: float,

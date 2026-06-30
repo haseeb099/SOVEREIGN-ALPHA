@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import html
+import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,10 +13,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from middleware.auth import extract_user_id
+from middleware.auth import resolve_user_id
 from models import Report
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 class ReportGenerateRequest(BaseModel):
@@ -246,9 +250,13 @@ def _html_report(payload: dict) -> str:
 </html>"""
 
 
+class ReportSendRequest(BaseModel):
+    to: str
+
+
 @router.post("/reports/generate")
 async def generate_report(request: Request, body: ReportGenerateRequest):
-    user_id = extract_user_id(request) or getattr(request.state, "user_id", None)
+    user_id = resolve_user_id(request)
     token = secrets.token_urlsafe(24)
     expires = datetime.now(timezone.utc) + timedelta(days=30)
     async with AsyncSessionLocal() as session:
@@ -291,24 +299,92 @@ async def report_html(token: str):
 
 @router.get("/reports/{token}/pdf")
 async def report_pdf(token: str):
-    """Returns HTML with PDF content-type — WeasyPrint deferred to production worker."""
+    """Render report HTML to PDF via WeasyPrint when available."""
     data = await get_report(token)
     html_content = _html_report(data["payload"])
-    return Response(
-        content=html_content.encode("utf-8"),
-        media_type="text/html",
-        headers={"Content-Disposition": f"attachment; filename={data['ticker']}-report.html"},
-    )
+    ticker = data["ticker"]
+
+    try:
+        from weasyprint import HTML
+
+        pdf_bytes = HTML(string=html_content).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{ticker}-report.pdf"'},
+        )
+    except ImportError:
+        logger.warning("WeasyPrint not installed — returning HTML fallback")
+        return Response(
+            content=html_content.encode("utf-8"),
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{ticker}-report.html"'},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
 
 
 @router.post("/reports/{report_id}/send")
-async def send_report(report_id: str, request: Request):
-    """Email report via Resend — deferred when RESEND_API_KEY unset."""
+async def send_report(report_id: str, request: Request, body: ReportSendRequest):
+    """Email report via Resend when RESEND_API_KEY is configured."""
     import os
+    import re
 
-    if not os.environ.get("RESEND_API_KEY"):
+    import httpx
+
+    to_email = body.to.strip()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", to_email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
         return {
             "status": "deferred",
             "detail": "RESEND_API_KEY not configured — email delivery not available",
         }
-    return {"status": "queued", "report_id": report_id}
+
+    from_email = os.environ.get("RESEND_FROM_EMAIL", "reports@sovereign-alpha.local")
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(select(Report).where(Report.share_token == report_id))
+        ).scalar_one_or_none()
+        if not row:
+            try:
+                row = (
+                    await session.execute(
+                        select(Report).where(Report.id == uuid.UUID(report_id))
+                    )
+                ).scalar_one_or_none()
+            except ValueError:
+                row = None
+        if not row:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+    share_url = f"/reports/{row.share_token}"
+    payload = {
+        "from": from_email,
+        "to": [to_email],
+        "subject": f"{row.ticker} — Sovereign-Alpha Research Report",
+        "html": (
+            f"<p>Your shared research report for <strong>{row.ticker}</strong> is ready.</p>"
+            f'<p><a href="{share_url}">View report</a> · '
+            f'<a href="{share_url}/pdf">Download PDF</a></p>'
+        ),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Resend error: {resp.text[:200]}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Email send failed: {exc}") from exc
+
+    return {"status": "sent", "report_id": str(row.id), "to": to_email}

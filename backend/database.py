@@ -45,6 +45,7 @@ async def init_db() -> None:
     """Run Alembic migrations or fall back to create_all for dev/test."""
     import models  # noqa: F401
 
+    environment = os.environ.get("ENVIRONMENT", "development")
     try:
         from alembic import command
         from alembic.config import Config
@@ -54,7 +55,14 @@ async def init_db() -> None:
         await loop.run_in_executor(None, command.upgrade, alembic_cfg, "head")
         logger.info("Alembic migrations applied")
     except Exception as e:
-        logger.warning("Alembic upgrade skipped (%s) — falling back to create_all", e)
+        if environment == "production":
+            logger.error("Alembic upgrade failed in production — aborting startup: %s", e)
+            raise
+        logger.error(
+            "Alembic upgrade failed (%s) — falling back to create_all. "
+            "Run: docker compose build backend && docker compose up -d && alembic upgrade head",
+            e,
+        )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 

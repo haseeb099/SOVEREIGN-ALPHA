@@ -86,10 +86,40 @@ async def search_market(query: str, limit: int = 10) -> list[dict]:
 
 
 async def get_history(ticker: str, range_key: str = "1y") -> list[dict]:
-    """Price history via Polygon with yfinance fallback."""
+    """Price history via Polygon with yfinance fallback and demo bars."""
     from services.polygon_service import get_price_history
 
-    return await get_price_history(ticker, range_key)
+    bars = await get_price_history(ticker, range_key)
+    if bars:
+        return bars
+    return _demo_history_bars(ticker, range_key)
+
+
+def _demo_history_bars(ticker: str, range_key: str = "1y") -> list[dict]:
+    """Synthetic daily bars when live market history is unavailable."""
+    import math
+    from datetime import datetime, timedelta
+
+    days_map = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730}
+    days = days_map.get(range_key, 365)
+    fallback_prices = {
+        "TSLA": 185.20,
+        "BTC": 94250.00,
+        "XAU": 2410.50,
+        "EUR": 1.0820,
+        "AAPL": 195.0,
+        "NVDA": 875.0,
+    }
+    base = fallback_prices.get(ticker.upper(), 100.0)
+    bars: list[dict] = []
+    end = datetime.utcnow().date()
+    for i in range(days):
+        d = end - timedelta(days=days - i - 1)
+        # gentle sine drift for plausible chart shape
+        drift = 1 + 0.08 * math.sin(i / 18) + 0.02 * math.cos(i / 7)
+        close = round(base * drift, 4)
+        bars.append({"date": d.strftime("%Y-%m-%d"), "close": close})
+    return bars[-min(len(bars), 252):]
 
 
 def get_last_market_fetch_at() -> float | None:

@@ -3,10 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, RefreshCw, Settings2, Trash2 } from "lucide-react";
-import type { AlertRule } from "@sovereign/shared";
-import { deleteAlertRule, fetchAlertRules, saveAlertRule } from "@/lib/api";
+import type { AlertNotification, AlertRule } from "@sovereign/shared";
+import {
+  deleteAlertRule,
+  fetchAlertNotifications,
+  fetchAlertRules,
+  fetchFlatfilesStatus,
+  saveAlertRule,
+} from "@/lib/api";
+import { authRequiredMessage, classifyFetchError, toastApiError } from "@/lib/api-errors";
+import { AuthGate, useAuthState } from "@/components/auth/auth-gate";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
+import { ApiErrorState } from "@/components/ui/api-error-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,10 +29,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 const emptyRule: AlertRule = {
-  ticker: "TSLA",
+  ticker: "",
   condition: "thesis_score_drop",
   channel: "email",
   threshold: 10,
@@ -37,23 +53,81 @@ const CONDITION_LABELS: Record<AlertRule["condition"], string> = {
   earnings_7d: "Earnings within 7d",
 };
 
+const CHANNEL_LABELS: Record<AlertRule["channel"], string> = {
+  email: "Email",
+  in_app: "In-app",
+  webhook: "Webhook",
+};
+
 export default function SettingsPage() {
+  const { persistMessage } = useAuthState();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [form, setForm] = useState<AlertRule>(emptyRule);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [notifications, setNotifications] = useState<AlertNotification[]>([]);
+  const [flatfilesStatus, setFlatfilesStatus] = useState<{
+    configured: boolean;
+    connected?: boolean;
+    detail?: string;
+  } | null>(null);
+  const [cacheDialogOpen, setCacheDialogOpen] = useState(false);
+  const [cacheKeys, setCacheKeys] = useState<string[]>([]);
+  const [flatfilesRefreshing, setFlatfilesRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<unknown | null>(null);
+  const [flatfilesTestResult, setFlatfilesTestResult] = useState<string | null>(null);
+  const [rulesTestResult, setRulesTestResult] = useState<string | null>(null);
+  const [s3DetailsOpen, setS3DetailsOpen] = useState(false);
 
-  const loadRules = async () => {
+  const loadRules = async (options?: { suppressErrorToast?: boolean }): Promise<void> => {
     setLoading(true);
+    setAuthError(false);
+    setLoadError(null);
     try {
       setRules(await fetchAlertRules());
+      setNotifications(await fetchAlertNotifications());
+    } catch (e) {
+      const err = classifyFetchError(e);
+      if (err.kind === "auth") {
+        setAuthError(true);
+        setRules([]);
+        setNotifications([]);
+      } else {
+        setLoadError(err);
+        if (!options?.suppressErrorToast) {
+          toastApiError(err);
+        }
+      }
+      throw err;
     } finally {
       setLoading(false);
     }
   };
 
+  const refreshFlatfilesStatus = async () => {
+    setFlatfilesRefreshing(true);
+    try {
+      const data = await fetchFlatfilesStatus();
+      setFlatfilesStatus({
+        configured: data.configured,
+        connected: data.connected ?? data.status === "ok",
+        detail: data.detail,
+      });
+      setFlatfilesTestResult(
+        data.connected ?? data.status === "ok" ? "✓ Connection successful" : "✗ Not connected",
+      );
+    } catch {
+      setFlatfilesStatus(null);
+      setFlatfilesTestResult("✗ Connection failed");
+    } finally {
+      setFlatfilesRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    void loadRules();
+    void loadRules().catch(() => {});
+    void refreshFlatfilesStatus();
   }, []);
 
   const onSave = async () => {
@@ -72,20 +146,29 @@ export default function SettingsPage() {
       setForm({ ...emptyRule, ticker: form.ticker });
       await loadRules();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Sign in to save alert rules");
+      const err = classifyFetchError(e);
+      toastApiError(err, {
+        message: err.kind === "auth" ? authRequiredMessage() : undefined,
+      });
     } finally {
       setSaving(false);
     }
   };
 
-  const clearLocalCache = () => {
+  const openClearCacheDialog = () => {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith("sovereign-")) keys.push(key);
     }
-    keys.forEach((k) => localStorage.removeItem(k));
-    toast.success(`Cleared ${keys.length} cached items`);
+    setCacheKeys(keys);
+    setCacheDialogOpen(true);
+  };
+
+  const clearLocalCache = () => {
+    cacheKeys.forEach((k) => localStorage.removeItem(k));
+    toast.success(`Cleared ${cacheKeys.length} cached items`);
+    setCacheDialogOpen(false);
   };
 
   const onDelete = async (id: string) => {
@@ -94,7 +177,7 @@ export default function SettingsPage() {
       toast.success("Rule deleted");
       await loadRules();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
+      toastApiError(e, { message: "Delete failed" });
     }
   };
 
@@ -102,24 +185,36 @@ export default function SettingsPage() {
     <DashboardShell
       title="Settings"
       subtitle="Alerts, preferences, and data management"
-      onRefresh={() => void loadRules()}
+      onRefresh={() => loadRules({ suppressErrorToast: true })}
       refreshing={loading}
     >
       <div className="flex flex-col gap-6">
+        <AuthGate show={authError}>
+        {loadError != null && !loading && (
+          <ApiErrorState error={loadError} onRetry={() => void loadRules()} />
+        )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard
             label="Active rules"
-            value={String(rules.length)}
+            value={loading ? "—" : String(rules.length)}
             icon={Bell}
             loading={loading}
           />
-          <KpiCard
-            label="Channels"
-            value={String(new Set(rules.map((r) => r.channel)).size || "—")}
-            hint="email · in-app · webhook"
-            icon={Settings2}
-            loading={loading}
-          />
+          <button
+            type="button"
+            className="text-left"
+            onClick={() =>
+              document.getElementById("notifications")?.scrollIntoView({ behavior: "smooth" })
+            }
+          >
+            <KpiCard
+              label="Channels"
+              value={loading ? "—" : String(new Set(rules.map((r) => r.channel)).size || "0")}
+              hint="See notifications section below"
+              icon={Settings2}
+              loading={loading}
+            />
+          </button>
           <KpiCard
             label="Local cache"
             value="Browser"
@@ -143,6 +238,7 @@ export default function SettingsPage() {
                     setForm((f) => ({ ...f, ticker: e.target.value.toUpperCase() }))
                   }
                   className="min-h-11 font-mono"
+                  placeholder="e.g. AAPL"
                 />
               </div>
               <div>
@@ -207,16 +303,21 @@ export default function SettingsPage() {
                 </div>
               )}
               <div>
-                <Label htmlFor="threshold">Threshold</Label>
+                <Label htmlFor="threshold">Threshold (percentage points)</Label>
                 <Input
                   id="threshold"
                   type="number"
+                  min={0}
+                  max={100}
                   value={form.threshold ?? 10}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, threshold: Number(e.target.value) }))
                   }
                   className="min-h-11"
                 />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  e.g. 10 = alert when thesis score drops 10 points
+                </p>
               </div>
               <Button onClick={() => void onSave()} disabled={saving} className="min-h-11">
                 {saving ? "Saving…" : "Save rule"}
@@ -234,16 +335,109 @@ export default function SettingsPage() {
                 holdings and alert rules sync when signed in.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={clearLocalCache}>
+                <Button variant="outline" size="sm" onClick={openClearCacheDialog}>
                   Clear local cache
                 </Button>
-                <Button variant="outline" size="sm" render={<Link href="/terms" />}>
+                <Link
+                  href="/terms"
+                  className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium hover:bg-muted/50"
+                >
                   Terms
-                </Button>
-                <Button variant="outline" size="sm" render={<Link href="/privacy" />}>
+                </Link>
+                <Link
+                  href="/privacy"
+                  className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium hover:bg-muted/50"
+                >
                   Privacy
-                </Button>
+                </Link>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="border-border/60 bg-card/40">
+            <CardHeader>
+              <CardTitle className="text-sm">Bulk Market Data (S3)</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              {flatfilesStatus == null ? (
+                <p>Status unavailable — backend offline?</p>
+              ) : flatfilesStatus.configured ? (
+                <div className="flex flex-col gap-2">
+                  <p>
+                    Configured ·{" "}
+                    {flatfilesStatus.connected ? "connected" : "not connected"}
+                    {flatfilesStatus.detail ? ` — ${flatfilesStatus.detail}` : ""}
+                  </p>
+                  <button
+                    type="button"
+                    className="text-left text-primary hover:underline"
+                    onClick={() => setS3DetailsOpen((v) => !v)}
+                  >
+                    {s3DetailsOpen ? "Hide" : "Show"} details
+                  </button>
+                  {s3DetailsOpen && (
+                    <p className="leading-relaxed">
+                      Massive flat files provide S3 bulk historical market data (CSV/GZIP) for
+                      backtesting and offline chart fallbacks.
+                    </p>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    disabled={flatfilesRefreshing}
+                    onClick={() => void refreshFlatfilesStatus()}
+                  >
+                    <RefreshCw className={flatfilesRefreshing ? "animate-spin" : ""} />
+                    Test connection
+                  </Button>
+                  {flatfilesTestResult && (
+                    <p className="font-mono text-[11px]">{flatfilesTestResult}</p>
+                  )}
+                </div>
+              ) : (
+                <p>Not configured — set MASSIVE_S3_* in .env for bulk historical data.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card id="notifications" className="border-border/60 bg-card/40">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-sm">Notifications</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void loadRules();
+                  setRulesTestResult(
+                    rules.length > 0
+                      ? `✓ ${rules.length} rule(s) loaded`
+                      : "✗ No rules configured",
+                  );
+                }}
+              >
+                Test rules
+              </Button>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2 text-xs">
+              {rulesTestResult && (
+                <p className="font-mono text-[11px]">{rulesTestResult}</p>
+              )}
+              {notifications.length === 0 ? (
+                <p className="text-muted-foreground">No active alerts — rules evaluate on analyze.</p>
+              ) : (
+                notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className="rounded border border-border/50 px-2 py-1.5"
+                  >
+                    <span className="font-mono font-semibold">{n.ticker}</span>
+                    <span className="text-muted-foreground"> — {n.message}</span>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </div>
@@ -263,12 +457,18 @@ export default function SettingsPage() {
           <CardContent className="p-0">
             {loading ? (
               <p className="p-4 text-xs text-muted-foreground">Loading rules…</p>
-            ) : rules.length === 0 ? (
+            ) : rules.length === 0 && notifications.length === 0 ? (
               <div className="p-4">
                 <EmptyState
-                  title="No rules configured"
-                  description="Create an alert rule above. Sign in to persist rules across sessions."
+                  title="No alerts configured"
+                  description={`Create a rule above to receive notifications. ${persistMessage}`}
                 />
+              </div>
+            ) : rules.length === 0 ? (
+              <div className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  No active rules — notifications will appear here when rules fire.
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -291,7 +491,7 @@ export default function SettingsPage() {
                         <td className="p-3 font-mono font-semibold">{r.ticker}</td>
                         <td className="p-3">{CONDITION_LABELS[r.condition]}</td>
                         <td className="p-3">
-                          <Badge variant="outline">{r.channel}</Badge>
+                          <Badge variant="outline">{CHANNEL_LABELS[r.channel]}</Badge>
                         </td>
                         <td className="p-3 font-mono">{r.threshold ?? "—"}</td>
                         <td className="p-3 text-right">
@@ -314,6 +514,35 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
+        </AuthGate>
+
+        <Dialog open={cacheDialogOpen} onOpenChange={setCacheDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Clear local cache?</DialogTitle>
+            </DialogHeader>
+            <p className="text-xs text-muted-foreground">
+              This removes {cacheKeys.length} item(s) including scenario sliders and copilot chat
+              history stored in this browser.
+            </p>
+            {cacheKeys.length > 0 && (
+              <ul className="max-h-32 overflow-y-auto text-[10px] font-mono text-muted-foreground">
+                {cacheKeys.slice(0, 12).map((k) => (
+                  <li key={k}>{k}</li>
+                ))}
+                {cacheKeys.length > 12 && <li>…and {cacheKeys.length - 12} more</li>}
+              </ul>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCacheDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={clearLocalCache}>
+                Clear {cacheKeys.length} items
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardShell>
   );

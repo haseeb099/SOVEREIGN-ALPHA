@@ -22,6 +22,8 @@ export default function TrackerPage() {
       points={analysis?.thesis_points ?? []}
       ticker={ticker}
       onRunAnalysis={() => void analyze()}
+      isAnalyzing={isAnalyzing}
+      hasAnalysis={analysis != null}
     />
   );
 }

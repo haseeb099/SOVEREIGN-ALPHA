@@ -36,7 +36,7 @@ async def test_analyze_response_matches_schema(
         "routers.analyze.run_analysis_pipeline",
         enriched_pipeline,
     )
-    monkeypatch.setattr("routers.analyze.get_earnings_calendar", AsyncMock(return_value=None))
+    monkeypatch.setattr("routers.analyze.get_earnings_overlay", AsyncMock(return_value=None))
 
     resp = await client.post(
         "/api/analyze",
@@ -103,7 +103,7 @@ async def test_analyze_passes_thesis_points(
         AsyncMock(return_value=sample_market_data),
     )
     monkeypatch.setattr("routers.analyze.run_analysis_pipeline", enriched_pipeline)
-    monkeypatch.setattr("routers.analyze.get_earnings_calendar", AsyncMock(return_value=None))
+    monkeypatch.setattr("routers.analyze.get_earnings_overlay", AsyncMock(return_value=None))
 
     thesis = [{"id": 1, "text": "Margins > 18%"}]
     resp = await client.post(

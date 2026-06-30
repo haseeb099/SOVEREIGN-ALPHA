@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from middleware.auth import extract_user_id, require_auth
+from middleware.auth import dev_auth_enabled, extract_user_id, require_auth
 
 
 def _make_request(headers: dict | None = None) -> Request:
@@ -74,3 +74,35 @@ def test_extract_user_id_dev_decode(monkeypatch):
 def test_extract_user_id_missing_header():
     request = _make_request()
     assert extract_user_id(request) is None
+
+
+def test_dev_auth_enabled_without_clerk(monkeypatch):
+    monkeypatch.delenv("CLERK_SECRET_KEY", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert dev_auth_enabled() is True
+
+
+def test_dev_auth_disabled_when_clerk_configured(monkeypatch):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert dev_auth_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_auth_middleware_assigns_dev_user(monkeypatch):
+    monkeypatch.delenv("CLERK_SECRET_KEY", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+
+    from middleware.auth import AuthMiddleware, DEV_LOCAL_USER
+    from starlette.responses import JSONResponse
+
+    async def call_next(request):
+        return JSONResponse({"user_id": getattr(request.state, "user_id", None)})
+
+    middleware = AuthMiddleware(app=object())
+    request = _make_request()
+    response = await middleware.dispatch(request, call_next)
+    assert response.status_code == 200
+    import json
+
+    assert json.loads(response.body)["user_id"] == DEV_LOCAL_USER

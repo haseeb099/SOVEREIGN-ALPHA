@@ -100,7 +100,25 @@ Output ONLY valid JSON with this structure:
   ],
   "audit_warnings": ["Optional list of integrity warnings, e.g. price target vs scenario mismatch"],
   "log_message": "Final synthesis complete — rating: BULLISH"
-}"""
+}
+
+Rating calibration (required):
+- BULLISH: 12M upside ≥ 15% vs spot AND thesis health ≥ 50
+- BEARISH: upside ≤ -10% OR thesis health < 30
+- NEUTRAL: otherwise
+Set rating from upside and confidence_score (health proxy = confidence_score × 10)."""
+
+
+def derive_rating(price: float, target: float, health: float) -> str:
+    """Derive BULLISH/BEARISH/NEUTRAL from upside and thesis health."""
+    if not price or price <= 0:
+        return "NEUTRAL"
+    upside = ((target - price) / price) * 100
+    if upside >= 15 and health >= 50:
+        return "BULLISH"
+    if upside <= -10 or health < 30:
+        return "BEARISH"
+    return "NEUTRAL"
 
 
 # ─── Core Agent Runner ───────────────────────────────────────────────────────
@@ -253,6 +271,25 @@ Red Team Agent Output:\n{json.dumps(results.get('red_team', {}), indent=2)}
     bull = results.get("bull", {})
     red_team = results.get("red_team", {})
 
+    price = float(market_data.get("price", 0) or 0)
+    target = float(synthesis.get("price_target") or bull.get("price_target", 0) or 0)
+    confidence = float(synthesis.get("confidence_score", 5.0) or 5.0)
+    health = confidence * 10
+    rating = synthesis.get("rating") or derive_rating(price, target, health)
+
+    resolved_thesis = synthesis.get("thesis_points") or thesis_points or []
+    if not resolved_thesis:
+        bull_verdict = synthesis.get("bull_verdict") or bull.get("verdict", "")
+        if bull_verdict:
+            resolved_thesis = [
+                {
+                    "id": 1,
+                    "text": bull_verdict[:240],
+                    "metric": "Bull catalyst",
+                    "status": "PENDING",
+                }
+            ]
+
     return {
         "ticker": ticker,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -265,14 +302,14 @@ Red Team Agent Output:\n{json.dumps(results.get('red_team', {}), indent=2)}
             "bull_verdict": synthesis.get("bull_verdict") or bull.get("verdict", ""),
             "bear_verdict": synthesis.get("bear_verdict") or red_team.get("verdict", ""),
             "summary": synthesis.get("summary", ""),
-            "price_target": synthesis.get("price_target") or bull.get("price_target", 0),
+            "price_target": target,
             "confidence_band": bull.get("confidence_band", [0, 0]),
-            "rating": synthesis.get("rating", "NEUTRAL"),
-            "confidence_score": synthesis.get("confidence_score", 5.0),
+            "rating": rating,
+            "confidence_score": confidence,
             "audit_warnings": synthesis.get("audit_warnings") or [],
             "distribution": synthesis.get("distribution"),
         },
-        "thesis_points": synthesis.get("thesis_points", thesis_points or []),
+        "thesis_points": resolved_thesis,
         "agent_logs": [],  # Populated via WebSocket, not in REST response
         "raw_agents": results,  # Include for debugging
     }

@@ -83,6 +83,10 @@ async def extract_thesis_from_document(file_bytes: bytes, filename: str) -> dict
         if "page_refs" not in point and page_map:
             point.setdefault("page_refs", page_map.get(str(i + 1), []))
 
+    for key in ("target_price", "ticker_guess", "rating", "document_type"):
+        if result.get(key) is None:
+            result.pop(key, None)
+
     result["raw_text_length"] = len(text)
     return result
 

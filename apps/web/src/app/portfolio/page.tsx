@@ -2,18 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import {
-  AlertTriangle,
-  Briefcase,
-  FileUp,
-  GitCompare,
-  PieChart,
-  Plus,
-  Shield,
-  Trash2,
-  TrendingUp,
-} from "lucide-react";
+import { AlertTriangle, Briefcase, FileUp, GitCompare, Info, Pencil, PieChart, Plus, Shield, Trash2, TrendingUp } from "lucide-react";
 import { HoldingSchema, type Holding, type PortfolioSummary } from "@sovereign/shared";
+import {
+  authRequiredMessage,
+  classifyFetchError,
+  toastApiError,
+} from "@/lib/api-errors";
 import {
   deletePortfolioHolding,
   fetchMarketSearch,
@@ -21,7 +16,9 @@ import {
   fetchPortfolioSummary,
   importPortfolioCsv,
   savePortfolioHolding,
+  updatePortfolioHolding,
 } from "@/lib/api";
+import { AuthGate, useAuthState } from "@/components/auth/auth-gate";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { formatUsd } from "@/lib/format";
@@ -63,6 +60,7 @@ function SectorBar({ label, weight }: { label: string; weight: number }) {
 }
 
 export default function PortfolioPage() {
+  const { persistMessage } = useAuthState();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [form, setForm] = useState({ ticker: "", shares: "", cost_basis: "" });
@@ -73,51 +71,74 @@ export default function PortfolioPage() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editHolding, setEditHolding] = useState<Holding | null>(null);
+  const [editForm, setEditForm] = useState({ shares: "", cost_basis: "" });
+  const [authError, setAuthError] = useState(false);
   const [summaryStale, setSummaryStale] = useState(false);
+  const [csvDragging, setCsvDragging] = useState(false);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [editFormErrors, setEditFormErrors] = useState<FormErrors>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const portfolioCacheKey = "sovereign-portfolio-summary";
 
-  const refresh = async (silent = false) => {
-    if (!silent) {
+  const refresh = async (options?: {
+    silent?: boolean;
+    suppressErrorToast?: boolean;
+  }): Promise<void> => {
+    if (!options?.silent) {
       setLoading(true);
       setSummaryLoading(true);
     } else {
       setRefreshing(true);
     }
     setSummaryStale(false);
-    const [holdingsData, summaryData] = await Promise.all([
-      fetchPortfolioHoldings(),
-      fetchPortfolioSummary(),
-    ]);
-    setHoldings(holdingsData);
-    if (summaryData) {
-      setSummary(summaryData);
-      try {
-        localStorage.setItem(portfolioCacheKey, JSON.stringify(summaryData));
-      } catch {
-        /* ignore */
-      }
-    } else {
-      try {
-        const cached = localStorage.getItem(portfolioCacheKey);
-        if (cached) {
-          setSummary(JSON.parse(cached) as PortfolioSummary);
-          setSummaryStale(true);
-        } else {
+    setAuthError(false);
+    try {
+      const [holdingsData, summaryData] = await Promise.all([
+        fetchPortfolioHoldings(),
+        fetchPortfolioSummary(),
+      ]);
+      setHoldings(holdingsData);
+      if (summaryData) {
+        setSummary(summaryData);
+        try {
+          localStorage.setItem(portfolioCacheKey, JSON.stringify(summaryData));
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try {
+          const cached = localStorage.getItem(portfolioCacheKey);
+          if (cached) {
+            setSummary(JSON.parse(cached) as PortfolioSummary);
+            setSummaryStale(true);
+          } else {
+            setSummary(null);
+          }
+        } catch {
           setSummary(null);
         }
-      } catch {
-        setSummary(null);
       }
+    } catch (e) {
+      const err = classifyFetchError(e);
+      if (err.kind === "auth") {
+        setAuthError(true);
+        setHoldings([]);
+        setSummary(null);
+      } else if (!options?.suppressErrorToast) {
+        toastApiError(err);
+      }
+      throw err;
+    } finally {
+      setLoading(false);
+      setSummaryLoading(false);
+      setRefreshing(false);
     }
-    setLoading(false);
-    setSummaryLoading(false);
-    setRefreshing(false);
   };
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch(() => {});
   }, []);
 
   const onTickerChange = (value: string) => {
@@ -136,9 +157,9 @@ export default function PortfolioPage() {
 
   const onSave = async () => {
     const parsed = HoldingSchema.safeParse({
-      ticker: form.ticker,
+      ticker: form.ticker.toUpperCase(),
       shares: Number(form.shares),
-      cost_basis: form.cost_basis ? Number(form.cost_basis) : undefined,
+      cost_basis: form.cost_basis ? Number(form.cost_basis) : 0,
     });
     if (!parsed.success) {
       const errs: FormErrors = {};
@@ -150,14 +171,23 @@ export default function PortfolioPage() {
       return;
     }
     setFormErrors({});
+    const searchResults = await fetchMarketSearch(parsed.data.ticker, 5);
+    const validTicker = searchResults.some((r) => r.ticker === parsed.data.ticker);
+    if (!validTicker) {
+      setFormErrors({ ticker: `"${parsed.data.ticker}" is not a recognized ticker` });
+      return;
+    }
     setSaving(true);
     try {
       await savePortfolioHolding(parsed.data);
       toast.success("Holding saved");
       setForm({ ticker: "", shares: "", cost_basis: "" });
-      await refresh(true);
+      await refresh({ silent: true });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Sign in to save holdings");
+      const err = classifyFetchError(e);
+      toastApiError(err, {
+        message: err.kind === "auth" ? authRequiredMessage() : undefined,
+      });
     } finally {
       setSaving(false);
     }
@@ -167,26 +197,72 @@ export default function PortfolioPage() {
     try {
       await deletePortfolioHolding(id);
       toast.success("Holding deleted");
-      await refresh(true);
+      await refresh({ silent: true });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
+      toastApiError(e, { message: "Delete failed" });
+    }
+  };
+
+  const onEditSave = async () => {
+    if (!editHolding?.id) return;
+    const parsed = HoldingSchema.safeParse({
+      ticker: editHolding.ticker,
+      shares: Number(editForm.shares),
+      cost_basis: editForm.cost_basis ? Number(editForm.cost_basis) : 0,
+    });
+    if (!parsed.success) {
+      const errs: FormErrors = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0] as keyof FormErrors;
+        if (key && key !== "ticker") errs[key] = issue.message;
+      }
+      setEditFormErrors(errs);
+      return;
+    }
+    setEditFormErrors({});
+    try {
+      await updatePortfolioHolding(editHolding.id, {
+        shares: Number(editForm.shares),
+        cost_basis: editForm.cost_basis ? Number(editForm.cost_basis) : undefined,
+      });
+      toast.success("Holding updated");
+      setEditHolding(null);
+      await refresh({ silent: true });
+    } catch (e) {
+      const err = classifyFetchError(e);
+      toastApiError(err, {
+        message: err.kind === "auth" ? authRequiredMessage() : undefined,
+      });
     }
   };
 
   const onCsv = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("CSV must be under 2 MB");
+      return;
+    }
+    setCsvUploading(true);
     try {
       const result = await importPortfolioCsv(file);
       toast.success(`Imported ${result.count} holdings`);
-      await refresh(true);
+      await refresh({ silent: true });
       if (csvInputRef.current) csvInputRef.current.value = "";
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Import failed — use CSV: ticker,shares,cost_basis",
-      );
+      toastApiError(e, {
+        message:
+          e instanceof Error
+            ? e.message
+            : "Import failed — use CSV: ticker,shares,cost_basis",
+      });
+    } finally {
+      setCsvUploading(false);
     }
   };
 
-  const displayHoldings = summary?.holdings.length ? summary.holdings : holdings;
+  const displayHoldings = useMemo(
+    () => (summary?.holdings?.length ? summary.holdings : holdings),
+    [summary?.holdings, holdings],
+  );
 
   const compareTickers = useMemo(
     () => displayHoldings.map((h) => h.ticker).join(","),
@@ -266,6 +342,7 @@ export default function PortfolioPage() {
             step="0.01"
             value={form.cost_basis}
             onChange={(e) => setForm((f) => ({ ...f, cost_basis: e.target.value }))}
+            placeholder="185.20"
             className="min-h-11"
           />
         </div>
@@ -275,23 +352,53 @@ export default function PortfolioPage() {
         {saving ? "Saving…" : "Save holding"}
       </Button>
       <div className="border-t border-border/40 pt-3">
-        <p className="mb-2 text-[10px] text-muted-foreground">
-          CSV format: ticker, shares, cost_basis (header required)
+        <p className="mb-2 text-xs text-foreground/80">
+          CSV format: ticker, shares, cost_basis (header required).{" "}
+          <Link href="/templates/holdings.csv" className="text-primary hover:underline">
+            Download template
+          </Link>
         </p>
-        <Label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed px-4 text-sm text-muted-foreground hover:bg-muted/40">
-          <FileUp className="size-4" />
-          Import CSV
-          <input
-            ref={csvInputRef}
-            type="file"
-            accept=".csv"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void onCsv(f);
-            }}
-          />
-        </Label>
+        <div
+          className={cn(
+            "flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 text-sm transition-colors",
+            csvDragging ? "border-primary bg-primary/10" : "border-primary/40 bg-primary/5 hover:bg-primary/10",
+          )}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setCsvDragging(true);
+          }}
+          onDragLeave={() => setCsvDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setCsvDragging(false);
+            const f = e.dataTransfer.files[0];
+            if (f) void onCsv(f);
+          }}
+        >
+          <Label className="flex cursor-pointer flex-col items-center gap-2 text-muted-foreground">
+            <FileUp className="size-6 text-primary" />
+            <span className="font-medium text-foreground">
+              {csvUploading ? "Importing…" : "Drop CSV or click to upload"}
+            </span>
+            <span className="text-[10px]">Max 2 MB · ticker, shares, cost_basis</span>
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv"
+              className="sr-only"
+              disabled={csvUploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onCsv(f);
+              }}
+            />
+          </Label>
+          {csvUploading && (
+            <div className="h-1 w-full max-w-xs overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-2/3 animate-pulse bg-primary" />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -300,7 +407,7 @@ export default function PortfolioPage() {
     <DashboardShell
       title="Portfolio"
       subtitle="Holdings, allocation, and hedge quality — synced when signed in"
-      onRefresh={() => void refresh(true)}
+      onRefresh={() => refresh({ silent: true, suppressErrorToast: true })}
       refreshing={refreshing}
       actions={
         <>
@@ -315,6 +422,7 @@ export default function PortfolioPage() {
               Compare all
             </Button>
           )}
+          {displayHoldings.length > 0 && (
           <Sheet open={addOpen} onOpenChange={setAddOpen}>
             <SheetTrigger render={<Button size="sm" className="gap-1.5" />}>
               <Plus className="size-3.5" />
@@ -327,16 +435,24 @@ export default function PortfolioPage() {
               <div className="mt-4">{AddHoldingForm}</div>
             </SheetContent>
           </Sheet>
+          )}
         </>
       }
     >
       <div className="flex flex-col gap-6">
+        <AuthGate show={authError}>
         {/* KPI row */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             label="Total value"
-            value={formatUsd(summary?.total_value, true)}
-            hint={summaryStale ? "Showing cached data" : undefined}
+            value={summary?.total_value != null ? formatUsd(summary.total_value, true) : "N/A"}
+            hint={
+              summaryStale
+                ? "Showing cached data"
+                : summary?.total_value == null
+                  ? "Add holdings to calculate"
+                  : undefined
+            }
             icon={Briefcase}
             loading={summaryLoading}
             variant={summaryStale ? "warn" : "default"}
@@ -346,9 +462,9 @@ export default function PortfolioPage() {
             value={
               summary?.hedge_quality_score != null
                 ? summary.hedge_quality_score.toFixed(0)
-                : "—"
+                : "N/A"
             }
-            hint="0–100 risk-adjusted score"
+            infoHint="Measures portfolio diversification and hedge effectiveness across sectors and asset classes (0–100)."
             icon={Shield}
             loading={summaryLoading}
             variant={
@@ -356,6 +472,7 @@ export default function PortfolioPage() {
                 ? "live"
                 : "default"
             }
+            className="relative"
           />
           <KpiCard
             label="Holdings"
@@ -433,7 +550,7 @@ export default function PortfolioPage() {
               <div className="p-4">
                 <EmptyState
                   title="No holdings yet"
-                  description="Add a holding or import a CSV. Sign in to persist across sessions."
+                  description={`Add a holding or import a CSV. ${persistMessage}`}
                   actionLabel="Add first holding"
                   onAction={() => setAddOpen(true)}
                 />
@@ -499,16 +616,34 @@ export default function PortfolioPage() {
                           {h.unrealized_pnl != null ? formatUsd(h.unrealized_pnl) : "—"}
                         </td>
                         <td className="text-right">
-                          {h.id && (
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => void onDelete(h.id!)}
-                              aria-label={`Delete ${h.ticker}`}
-                            >
-                              <Trash2 />
-                            </Button>
-                          )}
+                          <div className="flex justify-end gap-1">
+                            {h.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => {
+                                  setEditHolding(h);
+                                  setEditForm({
+                                    shares: String(h.shares),
+                                    cost_basis: h.cost_basis != null ? String(h.cost_basis) : "",
+                                  });
+                                }}
+                                aria-label={`Edit ${h.ticker}`}
+                              >
+                                <Pencil />
+                              </Button>
+                            )}
+                            {h.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => void onDelete(h.id!)}
+                                aria-label={`Delete ${h.ticker}`}
+                              >
+                                <Trash2 />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -518,14 +653,66 @@ export default function PortfolioPage() {
             )}
           </CardContent>
         </Card>
+        </AuthGate>
+
+        <Sheet open={!!editHolding} onOpenChange={(open) => !open && setEditHolding(null)}>
+          <SheetContent side="right" className="w-full sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>Edit {editHolding?.ticker}</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4 flex flex-col gap-3">
+              <div>
+                <Label htmlFor="edit-shares">Shares</Label>
+                <Input
+                  id="edit-shares"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={editForm.shares}
+                  onChange={(e) => setEditForm((f) => ({ ...f, shares: e.target.value }))}
+                  className="min-h-11"
+                  aria-invalid={!!editFormErrors.shares}
+                />
+                {editFormErrors.shares && (
+                  <p className="mt-1 text-xs text-destructive">{editFormErrors.shares}</p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="edit-cost">Cost basis</Label>
+                <div className="relative">
+                  <span className="absolute top-3 left-3 text-sm text-muted-foreground">$</span>
+                  <Input
+                    id="edit-cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="185.20"
+                    value={editForm.cost_basis}
+                    onChange={(e) => setEditForm((f) => ({ ...f, cost_basis: e.target.value }))}
+                    className="min-h-11 pl-7"
+                    aria-invalid={!!editFormErrors.cost_basis}
+                  />
+                </div>
+                {editFormErrors.cost_basis && (
+                  <p className="mt-1 text-xs text-destructive">{editFormErrors.cost_basis}</p>
+                )}
+              </div>
+              <Button onClick={() => void onEditSave()} className="min-h-11">
+                Save changes
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
 
         {/* Desktop add panel */}
+        {displayHoldings.length > 0 && (
         <Card className="hidden border-border/60 bg-card/40 lg:block">
           <CardHeader>
             <CardTitle className="text-sm">Add holding / Import</CardTitle>
           </CardHeader>
           <CardContent>{AddHoldingForm}</CardContent>
         </Card>
+        )}
       </div>
     </DashboardShell>
   );

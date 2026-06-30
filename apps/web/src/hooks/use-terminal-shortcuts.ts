@@ -16,15 +16,21 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function useTerminalShortcuts({
   onToggleScenario,
   onShowShortcuts,
+  onGoToTracker,
 }: {
   onToggleScenario?: () => void;
   onShowShortcuts?: () => void;
+  onGoToTracker?: () => void;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
 
-      if ((e.key === "s" || e.key === "S") && onToggleScenario) {
+      if (e.altKey && (e.key === "t" || e.key === "T") && onGoToTracker) {
+        e.preventDefault();
+        onGoToTracker();
+      }
+      if ((e.key === "s" || e.key === "S") && !e.altKey && onToggleScenario) {
         e.preventDefault();
         onToggleScenario();
       }
@@ -35,5 +41,5 @@ export function useTerminalShortcuts({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onToggleScenario, onShowShortcuts]);
+  }, [onToggleScenario, onShowShortcuts, onGoToTracker]);
 }

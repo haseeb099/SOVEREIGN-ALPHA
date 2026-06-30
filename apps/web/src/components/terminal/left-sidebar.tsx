@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FileUp, PanelLeft, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { FileUp, PanelLeft, RefreshCw, Search, Star, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IngestExtraction, MarketSearchResult } from "@sovereign/shared";
 import { useTerminal } from "@/providers/terminal-provider";
-import { fetchAssets, fetchMarketSearch, ingestDocument } from "@/lib/api";
+import {
+  createWatchlist,
+  fetchAssets,
+  fetchMarketSearch,
+  fetchWatchlists,
+  ingestDocument,
+  updateWatchlist,
+} from "@/lib/api";
+import { classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { ApiErrorState } from "@/components/ui/api-error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { computeThesisHealthPct } from "@/lib/thesis-health";
-import { staleDataLabel } from "@/lib/data-freshness";
+import { formatTimestamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -49,6 +57,30 @@ export function LeftSidebar({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [recalcState, setRecalcState] = useState<"idle" | "running" | "done">("idle");
+  const [recalcProgress, setRecalcProgress] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const [watchlistId, setWatchlistId] = useState<string | null>(null);
+  const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
+  const watchlistInitRef = useRef(false);
+
+  const loadWatchlist = useCallback(async (assetKeys: string[]) => {
+    try {
+      const lists = await fetchWatchlists();
+      if (lists.length > 0) {
+        setWatchlistId(lists[0].id);
+        setWatchlistTickers(lists[0].tickers);
+        return;
+      }
+      if (!watchlistInitRef.current && assetKeys.length > 0) {
+        watchlistInitRef.current = true;
+        const created = await createWatchlist("Default", assetKeys.slice(0, 8));
+        setWatchlistId(created.id);
+        setWatchlistTickers(created.tickers);
+      }
+    } catch {
+      /* auth or offline — fall back to asset list */
+    }
+  }, []);
 
   const loadAssets = useCallback(() => {
     setAssetsLoading(true);
@@ -60,17 +92,64 @@ export function LeftSidebar({
         if ("fallback" in d && d.fallback) {
           setAssetsFallback(true);
         }
+        void loadWatchlist(d.assets.map((a) => a.key));
       })
       .catch((e) => {
         setAssetsError(e);
-        toast.error("Failed to load asset list");
+        toastApiError(e, { message: "Failed to load asset list", onRetry: loadAssets });
       })
       .finally(() => setAssetsLoading(false));
-  }, []);
+  }, [loadWatchlist]);
 
   useEffect(() => {
     loadAssets();
   }, [loadAssets]);
+
+  const displayAssets = useMemo(() => {
+    const upperTicker = ticker.toUpperCase();
+    let list: { key: string; full_name: string }[];
+    if (watchlistTickers.length === 0) {
+      list = assets;
+    } else {
+      const byKey = new Map(assets.map((a) => [a.key, a]));
+      list = watchlistTickers.map((key) => byKey.get(key) ?? { key, full_name: key });
+    }
+    if (!list.some((a) => a.key === upperTicker)) {
+      const active = assets.find((a) => a.key === upperTicker) ?? {
+        key: upperTicker,
+        full_name: upperTicker,
+      };
+      return [active, ...list];
+    }
+    return list;
+  }, [assets, watchlistTickers, ticker]);
+
+  const toggleWatchlistTicker = async (symbol: string) => {
+    if (!watchlistId) {
+      toast.info("Watchlist is local-only — sign in to sync across devices");
+      return;
+    }
+    const upper = symbol.toUpperCase();
+    const next = watchlistTickers.includes(upper)
+      ? watchlistTickers.filter((t) => t !== upper)
+      : [...watchlistTickers, upper];
+    try {
+      const updated = await updateWatchlist(watchlistId, next);
+      setWatchlistTickers(updated.tickers);
+      toast.success(next.includes(upper) ? `Pinned ${upper}` : `Removed ${upper}`);
+    } catch (e) {
+      toastApiError(e);
+    }
+  };
+
+  const removeFromList = (symbol: string) => {
+    if (watchlistId) {
+      void toggleWatchlistTicker(symbol);
+      return;
+    }
+    setAssets((prev) => prev.filter((a) => a.key !== symbol));
+    toast.info(`Removed ${symbol} from local list`);
+  };
 
   useEffect(() => {
     setSearch(ticker);
@@ -114,7 +193,7 @@ export function LeftSidebar({
       }
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
+      toastApiError(e, { message: classifyFetchError(e).message || "Upload failed" });
     }
   };
 
@@ -205,21 +284,50 @@ export function LeftSidebar({
               <Skeleton className="h-10 w-full" />
             </>
           ) : (
-            assets.map((a) => (
-              <button
+            displayAssets.map((a) => (
+              <div
                 key={a.key}
-                type="button"
-                onClick={() => selectTicker(a.key)}
                 className={cn(
-                  "border-l-2 px-2 py-1.5 text-left text-xs transition-colors",
+                  "group flex items-center border-l-2 transition-colors",
                   ticker === a.key
-                    ? "border-primary bg-primary/5 text-foreground"
+                    ? "border-primary bg-primary/5"
                     : "border-transparent hover:bg-muted/50",
                 )}
               >
-                <div className="font-mono font-semibold">{a.key}</div>
-                <div className="truncate text-muted-foreground">{a.full_name}</div>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => selectTicker(a.key)}
+                  className="min-w-0 flex-1 px-2 py-1.5 text-left text-xs"
+                >
+                  <div className="font-mono font-semibold">{a.key}</div>
+                  <div className="truncate text-muted-foreground">{a.full_name}</div>
+                </button>
+                {watchlistId && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="mr-0.5 shrink-0 opacity-0 group-hover:opacity-100"
+                    onClick={() => void toggleWatchlistTicker(a.key)}
+                    aria-label={`${watchlistTickers.includes(a.key) ? "Unpin" : "Pin"} ${a.key}`}
+                  >
+                    <Star
+                      className={cn(
+                        "size-3.5",
+                        watchlistTickers.includes(a.key) && "fill-primary text-primary",
+                      )}
+                    />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="mr-1 shrink-0 opacity-0 group-hover:opacity-100"
+                  onClick={() => removeFromList(a.key)}
+                  aria-label={`Remove ${a.key}`}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </div>
             ))
           )}
         </div>
@@ -232,37 +340,60 @@ export function LeftSidebar({
             ${analysis?.memo.price_target.toFixed(2) ?? "—"}
           </div>
           <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-            THS {analysis ? computeThesisHealthPct(analysis)?.toFixed(0) : "—"}%
+            <abbr title="Thesis Health Score" className="no-underline">
+              Thesis Health
+            </abbr>{" "}
+            {analysis ? computeThesisHealthPct(analysis)?.toFixed(0) : "—"}%
           </div>
-          {staleDataLabel(lastUpdated) && (
-            <p className="mt-1 text-[10px] text-status-degraded">{staleDataLabel(lastUpdated)}</p>
-          )}
         </div>
+        {recalcState === "running" && (
+          <div className="h-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${recalcProgress}%` }}
+            />
+          </div>
+        )}
         <Button
           size="sm"
           onClick={async () => {
+            if (recalcState === "running") {
+              abortRef.current?.abort();
+              setRecalcState("idle");
+              setRecalcProgress(0);
+              return;
+            }
             setRecalcState("running");
+            setRecalcProgress(20);
+            const progressTimer = window.setInterval(() => {
+              setRecalcProgress((p) => Math.min(p + 8, 90));
+            }, 400);
             try {
               await analyze();
+              setRecalcProgress(100);
               setRecalcState("done");
               window.setTimeout(() => setRecalcState("idle"), 2000);
             } catch {
               setRecalcState("idle");
+            } finally {
+              window.clearInterval(progressTimer);
+              setRecalcProgress(0);
             }
           }}
-          disabled={isAnalyzing}
+          disabled={isAnalyzing && recalcState !== "running"}
           className="h-8 w-full font-mono text-[10px] uppercase"
+          aria-label={recalcState === "running" ? "Cancel recalculate" : "Recalculate analysis"}
         >
           <RefreshCw className={cn((isAnalyzing || recalcState === "running") && "animate-spin")} />
           {recalcState === "running" || isAnalyzing
-            ? "Running"
+            ? "Cancel"
             : recalcState === "done"
               ? "Complete"
               : "Recalculate"}
         </Button>
         <Label className="flex h-8 cursor-pointer items-center justify-center gap-2 border border-border px-2 text-[10px] uppercase text-muted-foreground hover:bg-muted/40">
-          <FileUp />
-          Upload document
+          <FileUp className="size-3.5" aria-hidden />
+          Upload research for {ticker}
           <input
             ref={fileInputRef}
             type="file"
@@ -276,7 +407,7 @@ export function LeftSidebar({
         </Label>
         {lastUpdated && (
           <p className="text-center text-[10px] text-muted-foreground">
-            Last run {new Date(lastUpdated).toLocaleString()}
+            Last run {formatTimestamp(lastUpdated, { showTz: true })}
           </p>
         )}
       </div>

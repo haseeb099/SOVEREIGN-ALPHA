@@ -156,7 +156,7 @@ export function SystemStatusBar({
               "inline-flex h-6 items-center gap-1.5 border px-2 uppercase transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
               STATUS_STYLES[status],
             )}
-            aria-label="System health details"
+            aria-label={`${STATUS_LABEL[status]} system health details`}
             title="System health · Alt+T opens tracker"
           >
             <span

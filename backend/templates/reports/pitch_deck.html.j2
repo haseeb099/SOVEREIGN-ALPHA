@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ ticker_escaped }} — Pitch Deck</title>
+{% include '_base_styles.html.j2' %}
+<style>
+  .slide { page-break-after: always; padding: 48px 0; min-height: 400px; }
+  .slide h1 { font-size: 2.4rem; margin-bottom: 24px; }
+  .slide p { font-size: 1.2rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="slide cover" style="min-height:500px">
+    <div class="meta">{{ firm_name }}</div>
+    <h1>{{ ticker_escaped }}</h1>
+    <p style="color:#fff;opacity:.9;font-size:1.4rem">{{ memo.rating or 'Investment Idea' }}</p>
+  </div>
+  <div class="body">
+    <div class="slide"><h1>The Opportunity</h1><p>{{ summary }}</p></div>
+    <div class="slide"><h1>Bull Case</h1><p>{{ bull_verdict }}</p></div>
+    <div class="slide"><h1>Risks</h1><p>{{ bear_verdict }}</p></div>
+    <div class="slide">
+      <h1>Target: {{ fmt_price(memo.price_target) }}</h1>
+      <p>Sovereign Score: {{ score_val }}</p>
+    </div>
+    <p class="disclaimer">{{ disclaimer }}</p>
+  </div>
+</div>
+</body>
+</html>

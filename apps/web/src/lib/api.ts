@@ -6,33 +6,46 @@ import {
   HistoryDiffSchema,
   IngestExtractionSchema,
   IngestThesisPointSchema,
-  MacroEventSchema,
   MarketDataSchema,
   NLScenarioResponseSchema,
   PortfolioSummarySchema,
   ScenarioPreviewResponseSchema,
   WatchlistSchema,
+  WorkflowStatusSchema,
   type AlertNotification,
   type AlertRule,
   type AnalyzeResponse,
   type HealthHistory,
   type HealthResponse,
   type HistoryDiff,
+  type CalendarEvent,
   type Holding,
   type IngestExtraction,
   type MacroEvent,
+  type MarketDepth,
+  type MarketIndicators,
+  type MemoFeedbackSection,
   type MarketSearchResult,
   type NLScenarioResponse,
   type PortfolioSummary,
   type PriceBar,
+  type RiskMetrics,
   type Scenario,
   type ScenarioPreviewResponse,
+  type TickerNewsResponse,
   type Watchlist,
+  type WorkflowStatus,
+  CalendarEventSchema,
+  MacroEventSchema,
+  MarketDepthSchema,
+  MarketIndicatorsSchema,
+  RiskMetricsSchema,
+  TickerNewsResponseSchema,
 } from "@sovereign/shared";
 import { ApiError, apiErrorFromResponse, classifyFetchError } from "@/lib/api-errors";
 
 const ENV_API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 /** Browser uses same-origin rewrites (next.config) to avoid CORS; SSR uses direct URL. */
 function resolveApiBase(): string {
@@ -44,14 +57,23 @@ const API_BASE = resolveApiBase();
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const ANALYZE_TIMEOUT_MS = 90_000;
+const WORKFLOW_TIMEOUT_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 20_000;
 
 export const FALLBACK_ASSETS: { key: string; full_name: string; asset_class: string }[] = [
   { key: "TSLA", full_name: "Tesla, Inc.", asset_class: "equity" },
   { key: "AAPL", full_name: "Apple Inc.", asset_class: "equity" },
   { key: "NVDA", full_name: "NVIDIA Corporation", asset_class: "equity" },
+  { key: "SPY", full_name: "SPDR S&P 500 ETF", asset_class: "etf" },
+  { key: "QQQ", full_name: "Invesco QQQ Trust", asset_class: "etf" },
+  { key: "IWM", full_name: "iShares Russell 2000 ETF", asset_class: "etf" },
+  { key: "TLT", full_name: "iShares 20+ Year Treasury Bond ETF", asset_class: "etf" },
+  { key: "GLD", full_name: "SPDR Gold Shares", asset_class: "etf" },
   { key: "BTC", full_name: "Bitcoin", asset_class: "crypto" },
+  { key: "ETH", full_name: "Ethereum", asset_class: "crypto" },
   { key: "XAU", full_name: "Gold Spot", asset_class: "commodity" },
+  { key: "USO", full_name: "United States Oil Fund", asset_class: "commodity" },
+  { key: "EUR", full_name: "EUR/USD", asset_class: "fx" },
 ];
 
 /** Stub for Clerk JWT — wired in auth provider when available. */
@@ -240,15 +262,91 @@ export async function fetchMarketSearch(
 export async function fetchMarketHistory(
   ticker: string,
   range = "1y",
+  interval = "1d",
 ): Promise<{ bars: PriceBar[]; error?: string }> {
   try {
     const data = await apiFetch<{ bars: PriceBar[]; error?: string }>(
-      `/api/market/${ticker}/history?range=${range}`,
+      `/api/market/${ticker}/history?range=${range}&interval=${interval}`,
     );
     return { bars: data.bars ?? [], error: data.error };
   } catch (e) {
     const apiError = classifyFetchError(e);
     return { bars: [], error: apiError.message };
+  }
+}
+
+export async function fetchMarketIndicators(
+  ticker: string,
+  range = "1y",
+): Promise<MarketIndicators | null> {
+  try {
+    const data = await apiFetch<{ indicators?: unknown }>(
+      `/api/market/${ticker}/indicators?range=${range}`,
+    );
+    return MarketIndicatorsSchema.parse(data.indicators ?? data);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchRiskMetrics(
+  ticker: string,
+  range = "1y",
+  benchmark = "SPY",
+): Promise<RiskMetrics | null> {
+  try {
+    const data = await apiFetch<unknown>(
+      `/api/market/${ticker}/risk-metrics?range=${range}&benchmark=${benchmark}`,
+    );
+    return RiskMetricsSchema.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMarketDepth(ticker: string): Promise<MarketDepth | null> {
+  try {
+    const data = await apiFetch<unknown>(`/api/market/${ticker}/depth`);
+    return MarketDepthSchema.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMarketCalendar(
+  ticker: string,
+  days = 30,
+): Promise<CalendarEvent[]> {
+  try {
+    const data = await apiFetch<{ events: unknown[] }>(
+      `/api/market/calendar?ticker=${ticker}&days=${days}`,
+    );
+    return (data.events ?? []).map((e) => CalendarEventSchema.parse(e));
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchTickerNews(
+  ticker: string,
+  limit = 10,
+): Promise<TickerNewsResponse> {
+  try {
+    const data = await apiFetch<unknown>(
+      `/api/market/${ticker}/news?limit=${limit}`,
+    );
+    const parsed = TickerNewsResponseSchema.safeParse(data);
+    if (parsed.success) return parsed.data;
+    if (data && typeof data === "object" && "events" in data) {
+      const raw = data as { events?: unknown[] };
+      return {
+        events: (raw.events ?? []).map((e) => MacroEventSchema.parse(e)),
+        articles: [],
+      };
+    }
+    return { events: [], articles: [] };
+  } catch {
+    return { events: [], articles: [] };
   }
 }
 
@@ -267,16 +365,15 @@ export async function fetchAssets() {
 }
 
 export async function fetchMacroEvents(ticker: string): Promise<MacroEvent[]> {
-  const data = await apiFetch<{ events: unknown[] }>(
-    `/api/market/${ticker}/news?limit=8`,
-  );
-  return data.events.map((e) => MacroEventSchema.parse(e));
+  const data = await fetchTickerNews(ticker, 8);
+  return data.events ?? [];
 }
 
 export async function runAnalysis(
   ticker: string,
   scenario: Scenario,
   thesisPoints?: AnalyzeResponse["thesis_points"],
+  options?: { corpus_id?: string },
 ): Promise<AnalyzeResponse> {
   try {
     const res = await fetchWithTimeout(
@@ -288,6 +385,7 @@ export async function runAnalysis(
           ticker,
           scenario,
           thesis_points: thesisPoints,
+          ...(options?.corpus_id ? { corpus_id: options.corpus_id } : {}),
         }),
       },
       ANALYZE_TIMEOUT_MS,
@@ -398,6 +496,48 @@ export async function ingestDocument(file: File) {
     ...data,
     extraction: parseIngestExtraction(data.extraction),
   };
+}
+
+export async function ingestDocumentBatch(
+  files: File[],
+  options?: { ticker?: string; name?: string },
+) {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file);
+  }
+  if (options?.ticker) form.append("ticker", options.ticker);
+  if (options?.name) form.append("name", options.name);
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/api/ingest/batch`, {
+    method: "POST",
+    headers: authHeaders,
+    body: form,
+  });
+  return parseJson<{
+    corpus_id: string;
+    document_ids: string[];
+    merged_extraction: IngestExtraction & { source_documents?: unknown[] };
+  }>(res);
+}
+
+export async function fetchCorpus(corpusId: string) {
+  return apiFetch<{
+    id: string;
+    name: string;
+    ticker?: string;
+    document_ids: string[];
+    merged_extraction?: IngestExtraction;
+    documents: { id: string; filename: string; extraction: unknown }[];
+    created_at: string;
+  }>(`/api/ingest/corpus/${corpusId}`);
+}
+
+export async function synthesizeCorpus(corpusId: string) {
+  return apiFetch<{ corpus_id: string; merged_extraction: IngestExtraction }>(
+    `/api/ingest/corpus/${corpusId}/synthesize`,
+    { method: "POST" },
+  );
 }
 
 export async function fetchHistory(ticker: string) {
@@ -545,8 +685,13 @@ export async function deleteLibraryDocument(docId: string) {
   return apiFetch(`/api/library/${docId}`, { method: "DELETE" });
 }
 
-export async function fetchReport(id: string) {
-  const res = await fetch(`${API_BASE}/api/reports/${id}`, { cache: "no-store" });
+export async function fetchReport(id: string, unlockToken?: string) {
+  const headers: Record<string, string> = {};
+  if (unlockToken) headers["X-Report-Unlock"] = unlockToken;
+  const res = await fetch(`${API_BASE}/api/reports/${id}`, {
+    cache: "no-store",
+    headers,
+  });
   const data = await parseJson<{
     id: string;
     ticker: string;
@@ -554,6 +699,9 @@ export async function fetchReport(id: string) {
     payload?: AnalyzeResponse;
     analysis?: AnalyzeResponse;
     share_token?: string;
+    password_protected?: boolean;
+    template?: string;
+    version?: number;
   }>(res);
   const analysis = data.payload ?? data.analysis;
   if (!analysis) {
@@ -565,19 +713,65 @@ export async function fetchReport(id: string) {
     created_at: data.created_at ?? new Date().toISOString(),
     analysis: AnalyzeResponseSchema.parse(analysis),
     share_token: data.share_token ?? id,
+    password_protected: data.password_protected ?? false,
+    template: data.template,
+    version: data.version,
   };
 }
 
-export async function generateReport(ticker: string, analysis: AnalyzeResponse) {
+export async function generateReport(
+  ticker: string,
+  analysis: AnalyzeResponse,
+  options?: {
+    template?: string;
+    expires_in_days?: number;
+    password?: string;
+    polish?: boolean;
+    branding?: { firm_name?: string; logo_url?: string; disclaimer?: string };
+    corpus_id?: string;
+    parent_report_id?: string;
+  },
+) {
   return apiFetch<{
     id: string;
     share_token: string;
     share_url: string;
     expires_at: string;
+    version?: number;
+    template?: string;
+    password_protected?: boolean;
   }>("/api/reports/generate", {
     method: "POST",
-    body: JSON.stringify({ ticker, analysis }),
+    body: JSON.stringify({ ticker, analysis, ...options }),
   });
+}
+
+export async function unlockReport(token: string, password: string) {
+  return apiFetch<{ unlocked: boolean; unlock_token?: string }>(
+    `/api/reports/${token}/unlock`,
+    { method: "POST", body: JSON.stringify({ password }) },
+  );
+}
+
+export async function fetchReportHistory(ticker: string) {
+  return apiFetch<{
+    ticker: string;
+    versions: {
+      id: string;
+      version: number;
+      template: string;
+      share_token: string;
+      created_at: string;
+      expires_at?: string;
+      password_protected: boolean;
+    }[];
+  }>(`/api/reports/history?ticker=${encodeURIComponent(ticker)}`);
+}
+
+export async function fetchReportDiff(fromId: string, toId: string) {
+  return apiFetch<{ from_id: string; to_id: string; diff: Record<string, unknown> }>(
+    `/api/reports/diff?from_id=${fromId}&to_id=${toId}`,
+  );
 }
 
 export async function fetchWatchlists(): Promise<Watchlist[]> {
@@ -655,4 +849,103 @@ export async function fetchFlatfilesStatus() {
     detail?: string;
     known_prefixes?: string[];
   }>("/api/market/flatfiles/status");
+}
+
+export type MemoFeedbackPayload = {
+  analysis_id?: string;
+  ticker?: string;
+  section: MemoFeedbackSection;
+  vote: "up" | "down";
+  comment?: string;
+};
+
+export async function submitMemoFeedback(payload: MemoFeedbackPayload) {
+  return apiFetch<{ id?: string; section: string; vote: string; created_at?: string }>(
+    "/api/feedback",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function startDueDiligenceWorkflow(
+  goal: string,
+  scenario?: Scenario,
+  autoApprove?: boolean,
+): Promise<WorkflowStatus> {
+  try {
+    const res = await fetchWithTimeout(
+      `${API_BASE}/api/workflows/due-diligence`,
+      {
+        method: "POST",
+        headers: await mergeAuthHeaders(),
+        body: JSON.stringify({
+          goal,
+          ...(scenario ? { scenario } : {}),
+          ...(autoApprove != null ? { auto_approve: autoApprove } : {}),
+        }),
+      },
+      WORKFLOW_TIMEOUT_MS,
+    );
+    return await parseJson(res, WorkflowStatusSchema);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw classifyFetchError(err);
+  }
+}
+
+export async function getWorkflowStatus(workflowId: string): Promise<WorkflowStatus> {
+  try {
+    const res = await fetchWithTimeout(
+      `${API_BASE}/api/workflows/${workflowId}`,
+      {
+        headers: await getAuthHeaders(),
+        cache: "no-store",
+      },
+      WORKFLOW_TIMEOUT_MS,
+    );
+    return await parseJson(res, WorkflowStatusSchema);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw classifyFetchError(err);
+  }
+}
+
+export async function approveWorkflowCheckpoint(
+  workflowId: string,
+  checkpoint: string,
+): Promise<WorkflowStatus> {
+  try {
+    const res = await fetchWithTimeout(
+      `${API_BASE}/api/workflows/${workflowId}/approve`,
+      {
+        method: "POST",
+        headers: await mergeAuthHeaders(),
+        body: JSON.stringify({ checkpoint, approved: true }),
+      },
+      WORKFLOW_TIMEOUT_MS,
+    );
+    return await parseJson(res, WorkflowStatusSchema);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw classifyFetchError(err);
+  }
+}
+
+export async function rejectWorkflow(workflowId: string): Promise<WorkflowStatus> {
+  try {
+    const res = await fetchWithTimeout(
+      `${API_BASE}/api/workflows/${workflowId}/reject`,
+      {
+        method: "POST",
+        headers: await mergeAuthHeaders(),
+      },
+      WORKFLOW_TIMEOUT_MS,
+    );
+    return await parseJson(res, WorkflowStatusSchema);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw classifyFetchError(err);
+  }
 }

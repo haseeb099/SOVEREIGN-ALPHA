@@ -10,6 +10,7 @@ from typing import Optional
 from cerebras.cloud.sdk import AsyncCerebras
 
 from cerebras_config import CEREBRAS_API_KEY, CEREBRAS_MODEL
+from services.retrieval_service import format_retrieved_sources, retrieve
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ You are an expert investment analyst with deep knowledge of:
 - Commodity markets (gold, oil)
 
 Your role: Answer the user's portfolio question concisely and with institutional precision.
+Only cite facts from RETRIEVED_SOURCES or portfolio context — do not invent metrics.
 Keep answers under 200 words. Be specific, cite metrics where relevant, and always end with a concrete recommendation or observation.
 Do NOT use markdown headers. Use plain prose."""
 
@@ -44,16 +46,17 @@ async def portfolio_copilot(request: CopilotRequest):
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    # Build context from portfolio state
     context_str = ""
+    ticker = "UNKNOWN"
     if request.portfolio_context:
         ctx = request.portfolio_context
+        ticker = str(ctx.get("ticker") or "UNKNOWN").upper()
         holdings = ctx.get("holdings") or []
         holdings_count = len(holdings) if isinstance(holdings, list) else 0
         total_value = ctx.get("total_value", 0)
         context_str = f"""
 Current Portfolio Context:
-- Active Asset: {ctx.get('ticker', 'Unknown')}
+- Active Asset: {ticker}
 - Price: ${ctx.get('price', 0):,.2f} ({ctx.get('change_pct', 0):+.1f}%)
 - Scenario: Margins={ctx.get('margins', 'N/A')}%, Rates={ctx.get('rates', 'N/A')}%, Sentiment={ctx.get('sentiment', 'N/A')}
 - Current Rating: {ctx.get('rating', 'N/A')}
@@ -70,7 +73,25 @@ Current Portfolio Context:
             if lines:
                 context_str += "Top holdings:\n" + "\n".join(lines) + "\n"
 
-    user_message = f"{context_str}\nUser Question: {request.query}"
+    retrieved = await retrieve(
+        ticker=ticker,
+        query=request.query,
+        filters={"source_types": ["document", "market", "filing"]},
+        top_k=6,
+    )
+    sources_block = format_retrieved_sources(retrieved)
+    data_citations = [
+        {
+            "chunk_id": c.get("chunk_id"),
+            "source_type": c.get("source_type"),
+            "source_label": c.get("source_label"),
+            "source_date": c.get("source_date"),
+            "data_point": c.get("chunk_text", "")[:200],
+        }
+        for c in retrieved
+    ]
+
+    user_message = f"{context_str}\n{sources_block}\nUser Question: {request.query}"
 
     async def stream_response():
         try:
@@ -92,6 +113,7 @@ Current Portfolio Context:
                 if content:
                     yield f"data: {json.dumps({'delta': content})}\n\n"
 
+            yield f"data: {json.dumps({'metadata': {'data_citations': data_citations}})}\n\n"
             yield "data: [DONE]\n\n"
 
         except Exception as e:

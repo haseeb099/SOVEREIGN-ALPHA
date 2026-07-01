@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button";
 import { ApiErrorState } from "@/components/ui/api-error-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FanChart, PriceHistoryChart, VerdictCards } from "@/components/terminal/memo-panel";
+import {
+  getSynthesisInsufficient,
+  InsufficientDataBanner,
+} from "@/components/terminal/insufficient-data-banner";
+import { PipelineTracePanel, resolveAgentTraces } from "@/components/terminal/pipeline-trace-panel";
+import {
+  resolveAnalysisId,
+  SectionFeedback,
+  thesisFeedbackSection,
+} from "@/components/terminal/section-feedback";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTerminal } from "@/providers/terminal-provider";
 import { ShareReportDialog } from "@/components/terminal/share-report-dialog";
@@ -95,7 +105,7 @@ function sovereignScoreClass(score: number): string {
 }
 
 export default function MemoPage() {
-  const { ticker, analysis, isAnalyzing, error, preview, analyze, isCached, lastUpdated, scenario } =
+  const { ticker, analysis, isAnalyzing, error, preview, analyze, isCached, lastUpdated, scenario, corpusId } =
     useTerminal();
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set());
   const [shareOpen, setShareOpen] = useState(false);
@@ -136,6 +146,9 @@ export default function MemoPage() {
   const displayHealth = preview?.thesis_health_pct ?? baseHealth;
   const visibleWarnings = (memo.audit_warnings ?? []).filter((w) => !dismissedWarnings.has(w));
   const changePositive = analysis.asset_change_pct >= 0;
+  const analysisId = resolveAnalysisId(analysis);
+  const agentTraces = resolveAgentTraces(analysis);
+  const synthesisInsufficient = getSynthesisInsufficient(agentTraces);
 
   return (
     <div className="flex flex-col gap-3">
@@ -144,6 +157,7 @@ export default function MemoPage() {
           Showing cached analysis — live refresh unavailable. Check system status above.
         </div>
       )}
+      <InsufficientDataBanner agentTraces={agentTraces} />
       <div className="terminal-panel">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-2">
           <div className="flex flex-wrap items-baseline gap-3">
@@ -192,7 +206,7 @@ export default function MemoPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
           <MetricCell
             label="PT 12M"
             value={`$${baseTarget.toFixed(2)}`}
@@ -245,6 +259,11 @@ export default function MemoPage() {
             />
           )}
           <MetricCell
+            label="Confidence"
+            value={`${memo.confidence_score.toFixed(1)}/10`}
+            hint="Memo-level synthesis confidence (0–10)"
+          />
+          <MetricCell
             label="Confidence Band"
             value={`$${memo.confidence_band[0].toFixed(0)}–$${memo.confidence_band[1].toFixed(0)}`}
             hint="Low–high range for the 12-month price target"
@@ -260,14 +279,56 @@ export default function MemoPage() {
           </div>
         )}
 
-        <p className="px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          {memo.summary}
-        </p>
+        <div className="flex items-start justify-between gap-2 border-t border-border px-3 py-2.5">
+          <p
+            className={cn(
+              "flex-1 text-xs leading-relaxed",
+              synthesisInsufficient ? "text-muted-foreground/80 italic" : "text-muted-foreground",
+            )}
+          >
+            {synthesisInsufficient
+              ? "Summary withheld — insufficient verified sources. See pipeline trace for agent reasoning."
+              : memo.summary}
+          </p>
+          <SectionFeedback analysisId={analysisId} ticker={ticker} section="summary" className="shrink-0" />
+        </div>
       </div>
 
+      <PipelineTracePanel analysis={analysis} />
       <FanChart memo={memo} spot={analysis.asset_price} ticker={ticker} />
       <PriceHistoryChart ticker={ticker} />
-      <VerdictCards memo={memo} rawAgents={analysis.raw_agents} />
+      <VerdictCards
+        memo={memo}
+        analysis={analysis}
+        bullFeedback={<SectionFeedback analysisId={analysisId} ticker={ticker} section="bull" />}
+        bearFeedback={<SectionFeedback analysisId={analysisId} ticker={ticker} section="bear" />}
+      />
+
+      {analysis.thesis_points.length > 0 && (
+        <div className="terminal-panel">
+          <div className="border-b border-border px-3 py-2">
+            <p className="panel-label">Thesis Points</p>
+          </div>
+          <ul className="divide-y divide-border/50">
+            {analysis.thesis_points.map((tp) => (
+              <li key={tp.id} className="flex items-start justify-between gap-2 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs leading-relaxed">{tp.text}</p>
+                  <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                    {tp.metric}
+                    {tp.current_value && ` · ${tp.current_value}`}
+                  </p>
+                </div>
+                <SectionFeedback
+                  analysisId={analysisId}
+                  ticker={ticker}
+                  section={thesisFeedbackSection(tp.id)}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {visibleWarnings.length > 0 && (
         <div className="terminal-panel border-l-2 border-l-status-degraded">
@@ -296,6 +357,7 @@ export default function MemoPage() {
         onOpenChange={setShareOpen}
         ticker={ticker}
         analysis={analysis}
+        corpusId={corpusId}
       />
     </div>
   );

@@ -1,8 +1,6 @@
-import { FanChart, VerdictCards } from "@/components/terminal/memo-panel";
-import { ThesisTrackerPanel } from "@/components/terminal/thesis-tracker-panel";
+import { ReportPasswordGate } from "@/components/reports/report-password-gate";
 import { fetchReport, getApiBase } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default async function ReportPage({
   params,
@@ -13,11 +11,17 @@ export default async function ReportPage({
 
   let report: Awaited<ReturnType<typeof fetchReport>> | null = null;
   let error: string | null = null;
+  let needsPassword = false;
 
   try {
     report = await fetchReport(id);
   } catch (e) {
-    error = e instanceof Error ? e.message : "Report not found";
+    const err = e as { status?: number; message?: string };
+    if (err.status === 401 || String(err.message ?? "").toLowerCase().includes("password")) {
+      needsPassword = true;
+    } else {
+      error = e instanceof Error ? e.message : "Report not found";
+    }
   }
 
   return (
@@ -46,31 +50,13 @@ export default async function ReportPage({
               </p>
             </CardContent>
           </Card>
-        ) : report ? (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Executive Summary</CardTitle>
-                <Badge variant="outline" className="font-mono">
-                  {report.analysis.memo.rating}
-                </Badge>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                {report.analysis.memo.summary}
-              </CardContent>
-            </Card>
-            <FanChart
-              memo={report.analysis.memo}
-              spot={report.analysis.asset_price}
-              ticker={report.ticker}
-            />
-            <VerdictCards memo={report.analysis.memo} rawAgents={report.analysis.raw_agents} />
-            <ThesisTrackerPanel
-              points={report.analysis.thesis_points}
-              ticker={report.ticker}
-            />
-          </>
-        ) : null}
+        ) : (
+          <ReportPasswordGate
+            token={id}
+            initialReport={report}
+            needsPassword={needsPassword || report?.password_protected === true}
+          />
+        )}
       </main>
     </div>
   );

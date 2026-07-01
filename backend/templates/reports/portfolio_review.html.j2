@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Portfolio Review — {{ firm_name }}</title>
+{% include '_base_styles.html.j2' %}
+</head>
+<body>
+<div class="page">
+  <header class="cover">
+    <div class="meta">{{ firm_name }} · Portfolio Review</div>
+    <h1>Portfolio Review</h1>
+    <div class="meta">Focus: {{ ticker_escaped }} · {{ generated }}</div>
+  </header>
+  <div class="body">
+    <h2>Holdings Snapshot</h2>
+    {% if portfolio.holdings %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Shares</th><th>Cost Basis</th></tr></thead>
+      <tbody>
+      {% for h in portfolio.holdings %}
+        <tr><td>{{ h.ticker }}</td><td>{{ h.shares }}</td><td>{{ h.cost_basis or 'N/A' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Primary holding analysis: <strong>{{ ticker_escaped }}</strong></p>
+  {% endif %}
+    <h2>{{ ticker_escaped }} Summary</h2>
+    <p>{{ summary }}</p>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Rating</div><div class="value">{{ memo.rating or 'N/A' }}</div></div>
+      <div class="kpi"><div class="label">Target</div><div class="value">{{ fmt_price(memo.price_target) }}</div></div>
+      <div class="kpi"><div class="label">Score</div><div class="value">{{ score_val }}</div></div>
+    </div>
+    <h2>Thesis Tracker</h2>
+    <table>
+      <thead><tr><th>Metric</th><th>Assumption</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for tp in thesis_points %}
+        <tr><td>{{ tp.metric }}</td><td>{{ tp.text }}</td><td>{{ tp.status }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="disclaimer">{{ disclaimer }}</p>
+  </div>
+</div>
+</body>
+</html>

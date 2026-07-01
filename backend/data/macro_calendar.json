@@ -1,0 +1,80 @@
+[
+  {
+    "date": "2026-01-28",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-03-18",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-04-29",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-06-17",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-07-29",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-09-16",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-10-28",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-12-09",
+    "title": "FOMC Interest Rate Decision",
+    "type": "fed",
+    "source": "Federal Reserve"
+  },
+  {
+    "date": "2026-02-07",
+    "title": "US Nonfarm Payrolls",
+    "type": "macro",
+    "source": "BLS"
+  },
+  {
+    "date": "2026-03-07",
+    "title": "US Nonfarm Payrolls",
+    "type": "macro",
+    "source": "BLS"
+  },
+  {
+    "date": "2026-04-04",
+    "title": "US Nonfarm Payrolls",
+    "type": "macro",
+    "source": "BLS"
+  },
+  {
+    "date": "2026-05-02",
+    "title": "US CPI Release",
+    "type": "macro",
+    "source": "BLS"
+  },
+  {
+    "date": "2026-06-11",
+    "title": "US CPI Release",
+    "type": "macro",
+    "source": "BLS"
+  }
+]

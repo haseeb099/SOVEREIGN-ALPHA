@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ ticker_escaped }} — Due Diligence Report</title>
+{% include '_base_styles.html.j2' %}
+<style>.risk-first h2 { color: #dc2626; } .checklist li { margin: 8px 0; }</style>
+</head>
+<body>
+<div class="page risk-first">
+  <header class="cover" style="border-bottom-color:#dc2626">
+    <div class="meta">{{ firm_name }} · Due Diligence</div>
+    <h1>{{ ticker_escaped }}</h1>
+    <div class="meta">Generated {{ generated }} · Risk-First Review</div>
+  </header>
+  <div class="body">
+    {% if warnings %}
+    <section class="warnings"><h2>Audit Warnings</h2><ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul></section>
+    {% endif %}
+    <h2>Red Team Assessment</h2>
+    <p>{{ bear_verdict }}</p>
+    <h2>Compliance Checklist</h2>
+    <ul class="checklist">
+      <li>Source citations verified: {{ 'Yes' if citations else 'Limited' }}</li>
+      <li>Thesis points tracked: {{ thesis_points|length }}</li>
+      <li>Rating: {{ memo.rating or 'N/A' }}</li>
+      <li>Target price: {{ fmt_price(memo.price_target) }}</li>
+    </ul>
+    <h2>Executive Summary</h2>
+    <p>{{ summary }}</p>
+    <h2>Thesis Assumptions</h2>
+    <table>
+      <thead><tr><th>Metric</th><th>Assumption</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for tp in thesis_points %}
+        <tr><td>{{ tp.metric }}</td><td>{{ tp.text }}</td><td>{{ tp.status }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h2>Source Appendix</h2>
+    <ul>{% for c in citations[:10] %}<li>{{ c.agent }}: {{ c.log_message or 'Analysis step' }}</li>{% else %}<li>No agent traces recorded</li>{% endfor %}</ul>
+    <p class="disclaimer">{{ disclaimer }}</p>
+  </div>
+</div>
+</body>
+</html>

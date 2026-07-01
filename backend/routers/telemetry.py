@@ -79,8 +79,10 @@ async def _local_broadcast(event: dict) -> None:
             _connected_clients.remove(ws)
 
 
-async def broadcast_log(event: dict) -> None:
+async def broadcast_log(event: dict, workflow_id: str | None = None) -> None:
     """Push log event to local WebSocket clients and Redis pub/sub peers."""
+    if workflow_id and "workflow_id" not in event:
+        event = {**event, "workflow_id": workflow_id}
     await _local_broadcast(event)
     await _publish_redis(event)
 

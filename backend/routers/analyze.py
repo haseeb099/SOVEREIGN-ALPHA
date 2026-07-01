@@ -12,11 +12,18 @@ from agents.pipeline import run_analysis_pipeline
 from middleware.auth import extract_user_id
 from routers.telemetry import broadcast_log
 from routers.alerts import evaluate_rules_for_ticker, evaluate_rules_for_user
+from services.consistency_service import run_consistency_checks
 from services.market_service import get_market_data
 from services.persistence_service import save_analysis, save_health_snapshot
 from services.polygon_service import get_earnings_overlay
+from services.retrieval_service import (
+    format_retrieved_sources,
+    index_market_snapshot,
+    retrieve,
+)
 from services.sovereign_score_service import attach_sovereign_score
 from services.valuation_engine import apply_to_memo
+from services.corpus_service import get_corpus_detail
 
 router = APIRouter()
 _batch_semaphore = asyncio.Semaphore(3)
@@ -33,6 +40,8 @@ class AnalyzeRequest(BaseModel):
     ticker: str = Field(..., description="Asset ticker symbol")
     scenario: ScenarioInput = ScenarioInput()
     thesis_points: Optional[list] = None
+    corpus_id: Optional[str] = None
+    document_ids: Optional[list[str]] = None
 
 
 class BatchAnalyzeRequest(BaseModel):
@@ -41,17 +50,46 @@ class BatchAnalyzeRequest(BaseModel):
 
 
 async def _run_analyze(request: AnalyzeRequest, user_id: str | None = None) -> dict:
-    market_data = await get_market_data(request.ticker.upper())
+    ticker = request.ticker.upper()
+    market_data = await get_market_data(ticker)
+    await index_market_snapshot(ticker, market_data)
+
+    thesis_points = request.thesis_points
+    document_ids = request.document_ids
+    if request.corpus_id and user_id:
+        corpus = await get_corpus_detail(request.corpus_id, user_id)
+        if corpus:
+            merged = corpus.get("merged_extraction") or {}
+            if merged.get("thesis_points"):
+                thesis_points = merged["thesis_points"]
+            document_ids = corpus.get("document_ids") or document_ids
+
+    filters: dict = {"source_types": ["document", "market", "filing"]}
+    if document_ids:
+        filters["document_ids"] = document_ids
+
+    retrieved = await retrieve(
+        ticker=ticker,
+        query=f"investment thesis fundamentals risks {ticker}",
+        filters=filters,
+        top_k=12,
+    )
+    retrieved_sources = format_retrieved_sources(retrieved)
     result = await run_analysis_pipeline(
-        ticker=request.ticker.upper(),
+        ticker=ticker,
         market_data=market_data,
         scenario=request.scenario.model_dump(),
-        thesis_points=request.thesis_points,
+        thesis_points=thesis_points,
+        retrieved_chunks=retrieved,
+        retrieved_sources=retrieved_sources,
         on_log=broadcast_log,
     )
     bull = (result.get("raw_agents") or {}).get("bull")
     red = (result.get("raw_agents") or {}).get("red_team")
     result["memo"] = apply_to_memo(result["memo"], market_data.get("price", 0), bull, red)
+    consistency_warnings = run_consistency_checks(result, retrieved_chunks=retrieved)
+    existing = result["memo"].get("audit_warnings") or []
+    result["memo"]["audit_warnings"] = existing + consistency_warnings
     result = attach_sovereign_score(result, market_data)
     result["last_updated"] = result.get("timestamp")
     earnings = await get_earnings_overlay(request.ticker.upper())

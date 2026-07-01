@@ -66,6 +66,21 @@ async def test_analyze_endpoint_response_satisfies_contract(
         enriched_pipeline,
     )
     monkeypatch.setattr("routers.analyze.get_earnings_overlay", AsyncMock(return_value=None))
+    monkeypatch.setattr("routers.analyze.index_market_snapshot", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "routers.analyze.retrieve",
+        AsyncMock(
+            return_value=[
+                {
+                    "chunk_id": "market-TSLA",
+                    "source_type": "market",
+                    "chunk_text": "TSLA spot $185.20",
+                    "source_label": "Polygon live quote",
+                    "source_date": "2026-06-30",
+                }
+            ]
+        ),
+    )
 
     resp = await client.post(
         "/api/analyze",

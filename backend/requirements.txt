@@ -9,6 +9,10 @@ python-multipart==0.0.12         # For file uploads
 # AI — Cerebras SDK (Gemma 4 31B)
 cerebras-cloud-sdk==1.19.0
 
+# Agent orchestration (Phase 19 LangGraph DAG)
+langgraph==1.2.7
+langchain-core==1.2.22
+
 # Market Data
 yfinance==0.2.50
 ccxt==4.4.50                     # Crypto exchange data (Binance, etc.)
@@ -48,6 +52,8 @@ sentry-sdk[fastapi]==2.19.0
 # Reports
 weasyprint==62.3
 resend==2.4.0
+jinja2==3.1.4
+bcrypt==4.2.1
 
 # Utilities
 python-dotenv==1.0.1             # Load .env file

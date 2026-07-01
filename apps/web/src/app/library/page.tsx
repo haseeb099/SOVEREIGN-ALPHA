@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { BookOpen, ExternalLink, FileText, FileUp, Trash2 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { BookOpen, ExternalLink, FileText, FileUp, Trash2, X } from "lucide-react";
 import type { IngestExtraction } from "@sovereign/shared";
-import { deleteLibraryDocument, fetchLibraryDocuments, ingestDocument } from "@/lib/api";
+import { deleteLibraryDocument, fetchLibraryDocuments, ingestDocument, ingestDocumentBatch } from "@/lib/api";
 import { authRequiredMessage, ApiError, classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { AuthGate } from "@/components/auth/auth-gate";
+import { CorpusDetailPanel } from "@/components/library/corpus-detail-panel";
+import { ReportHistoryPanel } from "@/components/reports/report-history-panel";
 import { useSystemHealth } from "@/hooks/use-system-health";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
@@ -103,10 +106,16 @@ function ExtractionPanel({ extraction }: { extraction: IngestExtraction }) {
 }
 
 export default function LibraryPage() {
+  const searchParams = useSearchParams();
+  const previewChunk = searchParams.get("chunk");
+  const previewSource = searchParams.get("source");
+  const previewDocId = searchParams.get("doc");
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown | null>(null);
   const [lastExtraction, setLastExtraction] = useState<IngestExtraction | null>(null);
+  const [lastCorpusId, setLastCorpusId] = useState<string | null>(null);
+  const [pendingBundleFiles, setPendingBundleFiles] = useState<File[]>([]);
   const [uploadQueue, setUploadQueue] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [authError, setAuthError] = useState(false);
@@ -159,6 +168,13 @@ export default function LibraryPage() {
       return true;
     });
     if (!valid.length) return;
+
+    if (valid.length >= 2 && valid.length <= 5) {
+      setPendingBundleFiles(valid);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     setUploading(true);
     setUploadQueue(valid.map((f) => ({ name: f.name, status: "pending" as const })));
     for (let i = 0; i < valid.length; i++) {
@@ -192,7 +208,67 @@ export default function LibraryPage() {
     await processUploadQueue([file]);
   };
 
+  const createResearchBundle = async () => {
+    if (pendingBundleFiles.length < 2) return;
+    setUploading(true);
+    setUploadQueue(
+      pendingBundleFiles.map((f) => ({ name: f.name, status: "pending" as const })),
+    );
+    try {
+      const result = await ingestDocumentBatch(pendingBundleFiles);
+      setLastCorpusId(result.corpus_id);
+      setLastExtraction(result.merged_extraction);
+      setUploadQueue((q) => q.map((item) => ({ ...item, status: "done" as const })));
+      toast.success(`Research bundle created (${result.document_ids.length} docs)`);
+      await refresh();
+    } catch (e) {
+      toastApiError(e, { message: "Bundle creation failed" });
+      setUploadQueue((q) => q.map((item) => ({ ...item, status: "error" as const })));
+    } finally {
+      setPendingBundleFiles([]);
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      window.setTimeout(() => setUploadQueue([]), 3000);
+    }
+  };
+
+  const uploadPendingIndividually = async () => {
+    const files = [...pendingBundleFiles];
+    setPendingBundleFiles([]);
+    setUploading(true);
+    setUploadQueue(files.map((f) => ({ name: f.name, status: "pending" as const })));
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]!;
+      try {
+        const result = await ingestDocument(file);
+        setLastExtraction(result.extraction);
+        setUploadQueue((q) =>
+          q.map((item, idx) => (idx === i ? { ...item, status: "done" } : item)),
+        );
+        toast.success(`Ingested ${result.filename}`);
+      } catch (e) {
+        setUploadQueue((q) =>
+          q.map((item, idx) => (idx === i ? { ...item, status: "error" } : item)),
+        );
+        toastApiError(classifyFetchError(e), { message: `Failed: ${file.name}` });
+      }
+    }
+    await refresh();
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    window.setTimeout(() => setUploadQueue([]), 3000);
+  };
+
   const thesisDocCount = docs.filter((d) => d.ticker_guess).length;
+
+  const previewDoc =
+    (previewDocId && docs.find((d) => d.id === previewDocId)) ||
+    (previewSource
+      ? docs.find((d) =>
+          d.filename.toLowerCase().includes(previewSource.toLowerCase()) ||
+          d.ticker_guess?.toLowerCase() === previewSource.toLowerCase(),
+        )
+      : undefined);
 
   return (
     <DashboardShell
@@ -301,7 +377,98 @@ export default function LibraryPage() {
         </Card>
         </div>
 
+        {pendingBundleFiles.length >= 2 && (
+          <Card className="border-primary/40 bg-primary/5">
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Create research bundle ({pendingBundleFiles.length} files)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <ul className="text-xs text-muted-foreground">
+                {pendingBundleFiles.map((f) => (
+                  <li key={f.name} className="font-mono">
+                    {f.name}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void createResearchBundle()} disabled={uploading}>
+                  Create research bundle
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void uploadPendingIndividually()}
+                  disabled={uploading}
+                >
+                  Upload individually
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPendingBundleFiles([])}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {lastCorpusId && (
+          <CorpusDetailPanel
+            corpusId={lastCorpusId}
+            onMerged={(merged) => setLastExtraction(merged)}
+          />
+        )}
+
+        <ReportHistoryPanel defaultTicker={lastExtraction?.ticker_guess ?? "TSLA"} />
+
         {lastExtraction && <ExtractionPanel extraction={lastExtraction} />}
+
+        {(previewChunk || previewSource || previewDoc) && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-mono">Citation preview</CardTitle>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Dismiss preview"
+                render={<Link href="/library" />}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              {previewDoc ? (
+                <div className="flex flex-col gap-2">
+                  <p className="font-medium text-foreground">{previewDoc.filename}</p>
+                  {previewDoc.ticker_guess && (
+                    <Link
+                      href={`/terminal/${previewDoc.ticker_guess}/memo`}
+                      className="font-mono text-primary hover:underline"
+                    >
+                      Open {previewDoc.ticker_guess} memo
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <p>No matching document in registry yet.</p>
+              )}
+              {previewChunk && (
+                <p className="mt-2 font-mono text-[10px]">
+                  Chunk: <span className="text-foreground">{previewChunk}</span>
+                </p>
+              )}
+              {previewSource && !previewDoc && (
+                <p className="mt-2 font-mono text-[10px]">
+                  Source: <span className="text-foreground">{previewSource}</span>
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="overflow-hidden border-border/60 bg-card/40">
           <CardHeader className="border-b border-border/40 py-3">
@@ -330,17 +497,28 @@ export default function LibraryPage() {
                 <table className="w-full min-w-[480px] text-left text-xs">
                   <thead className="bg-muted/30 text-muted-foreground">
                     <tr>
-                      <th className="p-3 font-medium">Filename</th>
-                      <th className="p-3 font-medium">Ticker</th>
-                      <th className="p-3 font-medium">Uploaded</th>
-                      <th className="p-3" />
+                      <th scope="col" className="p-3 font-medium">
+                        Filename
+                      </th>
+                      <th scope="col" className="p-3 font-medium">
+                        Ticker
+                      </th>
+                      <th scope="col" className="p-3 font-medium">
+                        Uploaded
+                      </th>
+                      <th scope="col" className="p-3">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {docs.map((d) => (
                       <tr
                         key={d.id}
-                        className="border-t border-border/40 transition-colors hover:bg-muted/20"
+                        className={cn(
+                          "border-t border-border/40 transition-colors hover:bg-muted/20",
+                          previewDoc?.id === d.id && "bg-primary/10",
+                        )}
                       >
                         <td className="p-3 font-medium">{d.filename}</td>
                         <td className="p-3">

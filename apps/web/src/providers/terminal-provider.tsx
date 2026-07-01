@@ -15,6 +15,7 @@ import {
   DEFAULT_TICKER,
   computeScenarioPreview,
   type AnalyzeResponse,
+  type IngestExtraction,
   type Scenario,
   type ScenarioPreviewResponse,
   type Ticker,
@@ -38,7 +39,12 @@ type TerminalContextValue = {
   hydrated: boolean;
   canUndo: boolean;
   canRedo: boolean;
-  analyze: (force?: boolean) => Promise<void>;
+  corpusId: string | null;
+  setCorpusId: (id: string | null) => void;
+  analyze: (thesisPoints?: AnalyzeResponse["thesis_points"]) => Promise<void>;
+  applyWorkflowAnalysis: (analysis: AnalyzeResponse) => void;
+  onIngestResult: (extraction: IngestExtraction) => void;
+  onCorpusResult: (merged: IngestExtraction) => void;
   applyScenarioField: <K extends keyof Scenario>(key: K, value: Scenario[K]) => void;
   undoScenario: () => void;
   redoScenario: () => void;
@@ -92,6 +98,13 @@ export function TerminalProvider({
   const scenarioRef = useRef<Scenario>(DEFAULT_SCENARIO);
   const historyIndexRef = useRef(0);
   const skipHistoryRef = useRef(false);
+  const corpusIdRef = useRef<string | null>(null);
+  const [corpusId, setCorpusIdState] = useState<string | null>(null);
+
+  const setCorpusId = useCallback((id: string | null) => {
+    corpusIdRef.current = id;
+    setCorpusIdState(id);
+  }, []);
 
   useEffect(() => {
     analysisRef.current = analysis;
@@ -152,16 +165,19 @@ export function TerminalProvider({
     [debouncedPreview, ticker],
   );
 
-  const analyze = useCallback(async () => {
+  const analyze = useCallback(async (thesisPoints?: AnalyzeResponse["thesis_points"]) => {
     setIsAnalyzing(true);
     setError(null);
     setIsCached(false);
     const activeScenario = scenarioRef.current;
+    const points =
+      thesisPoints !== undefined ? thesisPoints : analysisRef.current?.thesis_points;
     try {
       const result = await runAnalysis(
         ticker as Ticker,
         activeScenario,
-        analysisRef.current?.thesis_points,
+        points,
+        corpusIdRef.current ? { corpus_id: corpusIdRef.current } : undefined,
       );
       setAnalysis(result);
       skipHistoryRef.current = true;
@@ -195,6 +211,61 @@ export function TerminalProvider({
       setIsAnalyzing(false);
     }
   }, [ticker, applyScenario]);
+
+  const applyWorkflowAnalysis = useCallback((result: AnalyzeResponse) => {
+    setAnalysis(result);
+    setIsCached(false);
+    setLastUpdated(result.timestamp);
+    setError(null);
+    try {
+      sessionStorage.setItem(`sovereign-analysis-${result.ticker}`, JSON.stringify(result));
+    } catch {
+      /* ignore quota */
+    }
+  }, []);
+
+  const onIngestResult = useCallback(
+    (extraction: IngestExtraction) => {
+      const guess = extraction.ticker_guess?.trim().toUpperCase();
+      if (guess && guess !== ticker) {
+        setTicker(guess);
+      }
+      const points = extraction.thesis_points?.map((tp) => ({
+        id: tp.id,
+        text: tp.text,
+        metric: tp.metric,
+        status: tp.status ?? ("PENDING" as const),
+        current_value: tp.current_value,
+        threshold: tp.threshold,
+      }));
+      if (points?.length) {
+        void analyze(points);
+      }
+    },
+    [analyze, ticker],
+  );
+
+  const onCorpusResult = useCallback(
+    (merged: IngestExtraction) => {
+      const guess = merged.ticker_guess?.trim().toUpperCase();
+      if (guess && guess !== ticker) {
+        setTicker(guess);
+      }
+      const points = merged.thesis_points?.map((tp) => ({
+        id: tp.id,
+        text: tp.text,
+        metric: tp.metric,
+        status: tp.status ?? ("PENDING" as const),
+        current_value: tp.current_value,
+        threshold: tp.threshold,
+      }));
+      if (points?.length) {
+        void analyze(points);
+        toast.success(`Merged thesis from corpus (${points.length} points)`);
+      }
+    },
+    [analyze, ticker],
+  );
 
   const setScenario = useCallback(
     (next: Scenario) => {
@@ -288,7 +359,12 @@ export function TerminalProvider({
       hydrated,
       canUndo: historyIndex > 0,
       canRedo: historyIndex < scenarioHistory.length - 1,
+      corpusId,
+      setCorpusId,
       analyze,
+      applyWorkflowAnalysis,
+      onIngestResult,
+      onCorpusResult,
       applyScenarioField,
       undoScenario,
       redoScenario,
@@ -306,7 +382,12 @@ export function TerminalProvider({
       hydrated,
       historyIndex,
       scenarioHistory.length,
+      corpusId,
+      setCorpusId,
       analyze,
+      applyWorkflowAnalysis,
+      onIngestResult,
+      onCorpusResult,
       setScenario,
       applyScenarioField,
       undoScenario,

@@ -17,10 +17,12 @@ export function useTerminalShortcuts({
   onToggleScenario,
   onShowShortcuts,
   onGoToTracker,
+  onGoToCharts,
 }: {
   onToggleScenario?: () => void;
   onShowShortcuts?: () => void;
   onGoToTracker?: () => void;
+  onGoToCharts?: () => void;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -29,6 +31,10 @@ export function useTerminalShortcuts({
       if (e.altKey && (e.key === "t" || e.key === "T") && onGoToTracker) {
         e.preventDefault();
         onGoToTracker();
+      }
+      if (e.altKey && (e.key === "c" || e.key === "C") && onGoToCharts) {
+        e.preventDefault();
+        onGoToCharts();
       }
       if ((e.key === "s" || e.key === "S") && !e.altKey && onToggleScenario) {
         e.preventDefault();
@@ -41,5 +47,5 @@ export function useTerminalShortcuts({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onToggleScenario, onShowShortcuts, onGoToTracker]);
+  }, [onToggleScenario, onShowShortcuts, onGoToTracker, onGoToCharts]);
 }

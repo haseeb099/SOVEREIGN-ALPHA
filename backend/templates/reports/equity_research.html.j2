@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ ticker_escaped }} — Equity Research Report</title>
+{% include '_base_styles.html.j2' %}
+</head>
+<body>
+<div class="page">
+  <header class="cover">
+    {% if logo_url %}<img src="{{ logo_url }}" alt="" style="max-height:40px;margin-bottom:12px">{% endif %}
+    <div class="meta">{{ firm_name }} · Equity Research</div>
+    <h1>{{ ticker_escaped }}</h1>
+    <div class="meta">Generated {{ generated }}</div>
+    <span class="badge">{{ memo.rating or 'N/A' }}</span>
+  </header>
+  <div class="body">
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">12M Target</div><div class="value">{{ fmt_price(memo.price_target) }}</div></div>
+      <div class="kpi"><div class="label">Sovereign Score</div><div class="value">{{ score_val }}</div></div>
+      <div class="kpi"><div class="label">Confidence</div><div class="value">{{ memo.confidence_score or 'N/A' }}/10</div></div>
+    </div>
+    <h2>Executive Summary</h2>
+    <p>{{ summary }}</p>
+    <h2>Valuation Distribution</h2>
+    <table>
+      <thead><tr><th>Case</th><th>Price</th><th>Probability</th></tr></thead>
+      <tbody>
+      {% for row in distribution_rows %}
+        <tr><td>{{ row.label }}</td><td>{{ row.price }}</td><td>{{ row.prob }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h2>Bull vs Bear Debate</h2>
+    <div class="debate">
+      <div class="card bull"><strong>Bull Case</strong><p>{{ bull_verdict }}</p></div>
+      <div class="card bear"><strong>Bear Case</strong><p>{{ bear_verdict }}</p></div>
+    </div>
+    <h2>Thesis Tracker</h2>
+    <table>
+      <thead><tr><th>Metric</th><th>Assumption</th><th>Current</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for tp in thesis_points %}
+        <tr><td>{{ tp.metric }}</td><td>{{ tp.text }}</td><td>{{ tp.current_value }}</td><td>{{ tp.status }}</td></tr>
+      {% else %}
+        <tr><td colspan="4">No thesis points recorded</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if components %}
+    <h2>Score Components</h2>
+    <table><thead><tr><th>Factor</th><th>Score</th></tr></thead>
+    <tbody>{% for k, v in components.items() %}<tr><td>{{ k.replace('_', ' ').title() }}</td><td>{{ '%.1f'|format(v) }}</td></tr>{% endfor %}</tbody></table>
+    {% endif %}
+    {% if warnings %}
+    <section class="warnings"><h2>Audit Warnings</h2><ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul></section>
+    {% endif %}
+    <p class="disclaimer">{{ disclaimer }}</p>
+  </div>
+</div>
+</body>
+</html>

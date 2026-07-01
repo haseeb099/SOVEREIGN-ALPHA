@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 import path from "path";
 
-const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
+const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
   "",
 );

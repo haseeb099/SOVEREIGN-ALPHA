@@ -3,44 +3,12 @@ Document Ingestion Service
 Parses PDF/10-K/analyst memos and extracts investment thesis points.
 Uses PyMuPDF for PDF text extraction, then Cerebras to identify thesis assumptions.
 """
-import json
 import io
+import json
 from typing import Optional
-from cerebras.cloud.sdk import Cerebras
-from cerebras_config import CEREBRAS_API_KEY, CEREBRAS_MODEL
 
-EXTRACTION_PROMPT = """You are a senior investment analyst AI. You have been given raw text from an institutional investment document (10-K filing, analyst memo, research note, or earnings call transcript).
-
-Your job is to extract the core INVESTMENT THESIS ASSUMPTIONS — the specific, measurable claims the document makes about why this asset should perform well.
-
-Return a JSON object with this exact structure:
-{
-  "ticker_guess": "TSLA",
-  "document_type": "Analyst Memo",
-  "thesis_points": [
-    {
-      "id": 1,
-      "text": "Operating margins will remain above 18% by FY2025",
-      "metric": "Margins",
-      "threshold": "18%",
-      "timeframe": "FY2025",
-      "confidence": "HIGH",
-      "page_refs": [3, 4]
-    }
-  ],
-  "key_risks": ["Risk 1", "Risk 2"],
-  "target_price": 220.00,
-  "rating": "BUY",
-  "page_refs": {"summary": [1], "risks": [12]}
-}
-
-Rules:
-- Extract 3-6 specific, measurable thesis points only
-- Each thesis point must have a numeric threshold if possible
-- Include page_refs (1-indexed page numbers) where evidence was found
-- "metric" must be one of: Margins, Rates, Regulatory, Revenue, Growth, Macro
-- Be precise and institutional in language
-- If you cannot determine a value, use null"""
+from cerebras_config import CEREBRAS_API_KEY
+from services.chunked_extraction_service import extract_thesis_chunked
 
 
 async def extract_thesis_from_document(file_bytes: bytes, filename: str) -> dict:
@@ -56,37 +24,9 @@ async def extract_thesis_from_document(file_bytes: bytes, filename: str) -> dict
     if not text or len(text.strip()) < 100:
         raise ValueError("Could not extract meaningful text from document. File may be image-based or empty.")
 
-    text_excerpt = text[:4000]
+    result = await extract_thesis_chunked(text, page_map)
 
-    client = Cerebras(api_key=CEREBRAS_API_KEY)
-
-    response = client.chat.completions.create(
-        model=CEREBRAS_MODEL,
-        messages=[
-            {"role": "system", "content": EXTRACTION_PROMPT},
-            {"role": "user", "content": f"Extract investment thesis from this document:\n\n{text_excerpt}"},
-        ],
-        response_format={"type": "json_object"},
-        max_tokens=1200,
-        temperature=0.2,
-    )
-
-    result = json.loads(response.choices[0].message.content)
-
-    if page_map and "page_refs" not in result:
-        result["page_refs"] = page_map
-
-    for i, point in enumerate(result.get("thesis_points", [])):
-        point.setdefault("id", i + 1)
-        point.setdefault("status", "PENDING")
-        point.setdefault("current_value", "Awaiting live data")
-        if "page_refs" not in point and page_map:
-            point.setdefault("page_refs", page_map.get(str(i + 1), []))
-
-    for key in ("target_price", "ticker_guess", "rating", "document_type"):
-        if result.get(key) is None:
-            result.pop(key, None)
-
+    result["raw_text"] = text
     result["raw_text_length"] = len(text)
     return result
 

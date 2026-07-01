@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { PanelRight, Loader2 } from "lucide-react";
 import { DEFAULT_SCENARIO } from "@sovereign/shared";
 import { useTerminal } from "@/providers/terminal-provider";
@@ -186,7 +186,9 @@ export function RightSidebar({
 
           <Field label="Regulatory">
             <Select value={scenario.regulatory} onValueChange={(v) => applyScenarioField("regulatory", v as Scenario["regulatory"])}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-xs" aria-label="Regulatory risk level">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Low">Low</SelectItem>
                 <SelectItem value="Medium">Medium</SelectItem>
@@ -197,7 +199,9 @@ export function RightSidebar({
 
           <Field label="Sentiment">
             <Select value={scenario.sentiment} onValueChange={(v) => applyScenarioField("sentiment", v as Scenario["sentiment"])}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-xs" aria-label="Market sentiment">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Bullish">Bullish</SelectItem>
                 <SelectItem value="Neutral">Neutral</SelectItem>
@@ -234,7 +238,6 @@ export function RightSidebar({
               className="h-8 font-mono text-[9px] uppercase"
               disabled={isAnalyzing}
               onClick={() => void analyze()}
-              aria-label="Run analysis pipeline"
             >
               {isAnalyzing ? (
                 <>
@@ -347,10 +350,13 @@ function ScenarioSlider({
   suffix?: string;
   onChange: (v: number) => void;
 }) {
+  const labelId = useId();
   return (
     <div className="flex flex-col gap-1">
       <div className="flex justify-between text-[10px]">
-        <span className="panel-label">{label}</span>
+        <span id={labelId} className="panel-label">
+          {label}
+        </span>
         <span className="font-mono text-foreground">
           {value.toFixed(step < 1 ? 1 : 0)}
           {suffix}
@@ -366,7 +372,7 @@ function ScenarioSlider({
           if (typeof n === "number") onChange(n);
         }}
         className="py-2"
-        aria-label={`${label} slider`}
+        aria-labelledby={labelId}
       />
       <div className="flex justify-between font-mono text-[9px] text-muted-foreground">
         <span>

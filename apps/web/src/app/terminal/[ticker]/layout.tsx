@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useTerminal } from "@/providers/terminal-provider";
 import { TerminalTabBar } from "@/components/terminal/left-sidebar";
 
@@ -11,12 +11,18 @@ export default function TickerLayout({
   children: React.ReactNode;
 }) {
   const params = useParams<{ ticker: string }>();
+  const searchParams = useSearchParams();
   const ticker = (params.ticker ?? "TSLA").toUpperCase();
-  const { setTicker } = useTerminal();
+  const { setTicker, setCorpusId } = useTerminal();
 
   useEffect(() => {
     setTicker(ticker);
   }, [ticker, setTicker]);
+
+  useEffect(() => {
+    const corpus = searchParams.get("corpus");
+    setCorpusId(corpus);
+  }, [searchParams, setCorpusId]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

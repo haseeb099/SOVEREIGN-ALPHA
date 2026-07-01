@@ -45,6 +45,8 @@ from routers import (
     reports,
     library,
     public_v1,
+    feedback,
+    workflows,
 )
 from services.health_service import build_health_payload
 
@@ -92,6 +94,8 @@ app.include_router(watchlists.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(library.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
+app.include_router(workflows.router, prefix="/api")
 app.include_router(public_v1.router, prefix="/api")
 
 

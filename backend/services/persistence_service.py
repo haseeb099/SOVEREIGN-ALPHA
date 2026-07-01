@@ -79,14 +79,17 @@ async def find_duplicate_ingestion(
     """Return existing document id if same content hash was already ingested."""
     try:
         async with AsyncSessionLocal() as session:
-            stmt = select(IngestedDocument).order_by(IngestedDocument.created_at.desc())
-            rows = (await session.execute(stmt)).scalars().all()
-            for row in rows:
-                extraction = row.extraction or {}
-                if extraction.get("content_hash") != content_hash:
-                    continue
-                if user_id and row.user_id and row.user_id != user_id:
-                    continue
+            stmt = (
+                select(IngestedDocument)
+                .where(IngestedDocument.content_hash == content_hash)
+                .order_by(IngestedDocument.created_at.desc())
+            )
+            if user_id:
+                stmt = stmt.where(
+                    (IngestedDocument.user_id == user_id) | (IngestedDocument.user_id.is_(None))
+                )
+            row = (await session.execute(stmt.limit(1))).scalar_one_or_none()
+            if row:
                 return str(row.id)
     except Exception as e:
         logger.warning("Duplicate check failed: %s", e)
@@ -99,6 +102,7 @@ async def save_ingestion(
     extraction: dict,
     user_id: Optional[str] = None,
     raw_text: Optional[str] = None,
+    content_hash: Optional[str] = None,
 ) -> Optional[str]:
     try:
         async with AsyncSessionLocal() as session:
@@ -109,6 +113,7 @@ async def save_ingestion(
                 user_id=user_id,
                 raw_text=raw_text,
                 ticker_guess=extraction.get("ticker_guess"),
+                content_hash=content_hash or extraction.get("content_hash"),
                 tags=extraction.get("tags") or [],
             )
             session.add(row)

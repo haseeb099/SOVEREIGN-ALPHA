@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.news_service import _classify_sentiment, _mock_events, get_news_events
+from services.news_service import _classify_sentiment, _mock_events, get_news_events, get_news_feed
 
 
 def test_classify_sentiment_bullish():
@@ -22,14 +22,18 @@ def test_classify_sentiment_neutral():
 @pytest.mark.asyncio
 async def test_no_api_key_returns_mock_events(monkeypatch):
     monkeypatch.setattr("services.news_service.NEWS_API_KEY", "")
-    events = await get_news_events("TSLA")
-    assert len(events) == 4
-    assert events[0]["type"] in {"macro", "company", "reg", "news"}
+    monkeypatch.setattr("services.news_service.POLYGON_API_KEY", "")
+    feed = await get_news_feed("TSLA")
+    assert len(feed["events"]) == 4
+    assert feed["events"][0]["type"] in {"macro", "company", "reg", "news"}
+    assert "ticker_sentiment_score" in feed
+    assert "bullish_pct" in feed
 
 
 @pytest.mark.asyncio
 async def test_newsapi_failure_falls_back_to_mock(monkeypatch):
     monkeypatch.setattr("services.news_service.NEWS_API_KEY", "test-key")
+    monkeypatch.setattr("services.news_service.POLYGON_API_KEY", "")
 
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=None)
@@ -45,14 +49,17 @@ async def test_newsapi_failure_falls_back_to_mock(monkeypatch):
         mock_client.get = AsyncMock(side_effect=RuntimeError("NewsAPI down"))
         mock_client_cls.return_value = mock_client
 
-        events = await get_news_events("TSLA")
+        feed = await get_news_feed("TSLA")
 
-    assert events == _mock_events("TSLA")
+    assert len(feed["events"]) == 4
+    assert feed["events"][0]["text"] == _mock_events("TSLA")[0]["text"]
+    assert "sentiment_score" in feed["events"][0]
 
 
 @pytest.mark.asyncio
 async def test_newsapi_success_returns_events(monkeypatch):
     monkeypatch.setattr("services.news_service.NEWS_API_KEY", "test-key")
+    monkeypatch.setattr("services.news_service.POLYGON_API_KEY", "")
 
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=None)
@@ -87,23 +94,31 @@ async def test_newsapi_success_returns_events(monkeypatch):
     assert len(events) == 1
     assert events[0]["text"] == "Tesla rally on strong delivery numbers"
     assert events[0]["sentiment"] == "Bullish"
+    assert "sentiment_score" in events[0]
     assert events[0]["type"] == "news"
 
 
 @pytest.mark.asyncio
 async def test_redis_cache_hit_skips_http(monkeypatch):
-    cached = [{"id": 1, "text": "Cached headline", "sentiment": "Neutral", "type": "news"}]
+    cached = {
+        "events": [{"id": 1, "text": "Cached headline", "sentiment": "Neutral", "type": "news"}],
+        "ticker_sentiment_score": 0.0,
+        "bullish_pct": 0.0,
+        "bearish_pct": 0.0,
+        "neutral_pct": 100.0,
+    }
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=json.dumps(cached))
 
     monkeypatch.setattr("services.news_service.NEWS_API_KEY", "test-key")
+    monkeypatch.setattr("services.news_service.POLYGON_API_KEY", "")
     monkeypatch.setattr(
         "services.news_service.redis.from_url",
         AsyncMock(return_value=mock_redis),
     )
 
     with patch("services.news_service.httpx.AsyncClient") as mock_client_cls:
-        events = await get_news_events("TSLA")
+        feed = await get_news_feed("TSLA")
         mock_client_cls.assert_not_called()
 
-    assert events == cached
+    assert feed == cached

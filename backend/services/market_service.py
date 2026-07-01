@@ -21,10 +21,66 @@ ASSET_CONFIG = {
         "asset_class": "Equity / Auto-Tech",
         "icon": "electric_car",
     },
+    "SPY": {
+        "source": "yfinance",
+        "ticker": "SPY",
+        "full_name": "SPDR S&P 500 ETF Trust",
+        "asset_class": "ETF / Broad Market",
+        "icon": "show_chart",
+    },
+    "QQQ": {
+        "source": "yfinance",
+        "ticker": "QQQ",
+        "full_name": "Invesco QQQ Trust",
+        "asset_class": "ETF / Technology",
+        "icon": "show_chart",
+    },
+    "IWM": {
+        "source": "yfinance",
+        "ticker": "IWM",
+        "full_name": "iShares Russell 2000 ETF",
+        "asset_class": "ETF / Small Cap",
+        "icon": "show_chart",
+    },
+    "TLT": {
+        "source": "yfinance",
+        "ticker": "TLT",
+        "full_name": "iShares 20+ Year Treasury Bond ETF",
+        "asset_class": "ETF / Fixed Income",
+        "icon": "savings",
+    },
+    "GLD": {
+        "source": "yfinance",
+        "ticker": "GLD",
+        "full_name": "SPDR Gold Shares",
+        "asset_class": "ETF / Commodity",
+        "icon": "savings",
+    },
+    "USO": {
+        "source": "yfinance",
+        "ticker": "USO",
+        "full_name": "United States Oil Fund",
+        "asset_class": "ETF / Energy",
+        "icon": "local_gas_station",
+    },
+    "CL": {
+        "source": "yfinance",
+        "ticker": "CL=F",
+        "full_name": "WTI Crude Oil Futures",
+        "asset_class": "Energy Commodity",
+        "icon": "local_gas_station",
+    },
     "BTC": {
         "source": "ccxt",
         "ticker": "BTC/USDT",
         "full_name": "Bitcoin USD Spot",
+        "asset_class": "Digital Commodity",
+        "icon": "currency_bitcoin",
+    },
+    "ETH": {
+        "source": "ccxt",
+        "ticker": "ETH/USDT",
+        "full_name": "Ethereum USD Spot",
         "asset_class": "Digital Commodity",
         "icon": "currency_bitcoin",
     },
@@ -85,10 +141,13 @@ async def search_market(query: str, limit: int = 10) -> list[dict]:
     return await search_market_tickers(query, limit)
 
 
-async def get_history(ticker: str, range_key: str = "1y") -> list[dict]:
+async def get_history(ticker: str, range_key: str = "1y", interval: str = "1d") -> list[dict]:
     """Price history via Polygon with yfinance fallback and demo bars."""
     from services.polygon_service import get_price_history
 
+    if interval != "1d":
+        # Daily bars only for v1; interval param accepted for forward compatibility
+        pass
     bars = await get_price_history(ticker, range_key)
     if bars:
         return bars
@@ -104,7 +163,15 @@ def _demo_history_bars(ticker: str, range_key: str = "1y") -> list[dict]:
     days = days_map.get(range_key, 365)
     fallback_prices = {
         "TSLA": 185.20,
+        "SPY": 520.0,
+        "QQQ": 450.0,
+        "IWM": 210.0,
+        "TLT": 92.0,
+        "GLD": 220.0,
+        "USO": 72.0,
+        "CL": 72.0,
         "BTC": 94250.00,
+        "ETH": 3400.0,
         "XAU": 2410.50,
         "EUR": 1.0820,
         "AAPL": 195.0,
@@ -115,11 +182,43 @@ def _demo_history_bars(ticker: str, range_key: str = "1y") -> list[dict]:
     end = datetime.utcnow().date()
     for i in range(days):
         d = end - timedelta(days=days - i - 1)
-        # gentle sine drift for plausible chart shape
         drift = 1 + 0.08 * math.sin(i / 18) + 0.02 * math.cos(i / 7)
         close = round(base * drift, 4)
-        bars.append({"date": d.strftime("%Y-%m-%d"), "close": close})
+        open_px = round(close * (1 - 0.005 * math.sin(i / 5)), 4)
+        high = round(max(open_px, close) * 1.01, 4)
+        low = round(min(open_px, close) * 0.99, 4)
+        volume = int(1_000_000 + 50_000 * abs(math.sin(i / 3)))
+        bars.append(
+            {
+                "date": d.strftime("%Y-%m-%d"),
+                "open": open_px,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+            }
+        )
     return bars[-min(len(bars), 252):]
+
+
+async def get_indicators(ticker: str, range_key: str = "1y") -> dict:
+    from services.indicators_service import compute_indicators
+
+    bars = await get_history(ticker, range_key)
+    return compute_indicators(bars)
+
+
+async def get_risk_metrics(
+    ticker: str,
+    range_key: str = "1y",
+    benchmark: str = "SPY",
+) -> dict:
+    from services.risk_metrics_service import compute_risk_metrics
+
+    bars = await get_history(ticker, range_key)
+    bench_bars = await get_history(benchmark, range_key) if benchmark else []
+    metrics = compute_risk_metrics(bars, bench_bars)
+    return {"ticker": ticker.upper(), "range": range_key, "benchmark": benchmark.upper(), **metrics}
 
 
 def get_last_market_fetch_at() -> float | None:
@@ -319,7 +418,15 @@ async def _fetch_ccxt(symbol: str, config: dict) -> dict:
 def _fallback_data(asset_key: str, config: dict, error: str) -> dict:
     fallback_prices = {
         "TSLA": {"price": 185.20, "change_pct": 2.4, "volatility_30d": 38.4},
+        "SPY": {"price": 520.0, "change_pct": 0.5, "volatility_30d": 12.0},
+        "QQQ": {"price": 450.0, "change_pct": 0.8, "volatility_30d": 15.0},
+        "IWM": {"price": 210.0, "change_pct": -0.3, "volatility_30d": 18.0},
+        "TLT": {"price": 92.0, "change_pct": -0.2, "volatility_30d": 10.0},
+        "GLD": {"price": 220.0, "change_pct": 0.4, "volatility_30d": 11.0},
+        "USO": {"price": 72.0, "change_pct": 1.2, "volatility_30d": 28.0},
+        "CL": {"price": 72.0, "change_pct": 1.2, "volatility_30d": 28.0},
         "BTC": {"price": 94250.00, "change_pct": 5.8, "volatility_30d": 54.2},
+        "ETH": {"price": 3400.0, "change_pct": 3.2, "volatility_30d": 48.0},
         "XAU": {"price": 2410.50, "change_pct": -0.4, "volatility_30d": 14.1},
         "EUR": {"price": 1.0820, "change_pct": 0.1, "volatility_30d": 8.5},
     }

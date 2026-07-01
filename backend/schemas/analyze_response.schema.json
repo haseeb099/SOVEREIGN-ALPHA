@@ -105,6 +105,47 @@
       "type": "array",
       "items": { "type": "object" }
     },
-    "raw_agents": { "type": "object" }
+    "raw_agents": { "type": "object" },
+    "agent_traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["agent", "confidence", "insufficient_data", "citations", "log_message"],
+        "properties": {
+          "agent": {
+            "type": "string",
+            "enum": ["FUNDAMENTAL", "MACRO", "BULL", "RED_TEAM", "SYNTHESIS"]
+          },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 10 },
+          "insufficient_data": { "type": "boolean" },
+          "insufficient_reason": { "type": "string" },
+          "citations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["source_type", "source_label", "source_date", "data_point"],
+              "properties": {
+                "chunk_id": { "type": "string" },
+                "source_type": {
+                  "type": "string",
+                  "enum": ["document", "market", "filing", "news"]
+                },
+                "source_label": { "type": "string" },
+                "source_date": { "type": "string" },
+                "data_point": { "type": "string" },
+                "url": { "type": "string" }
+              }
+            }
+          },
+          "reasoning_steps": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "log_message": { "type": "string" },
+          "elapsed_ms": { "type": "number" }
+        }
+      }
+    }
   }
 }

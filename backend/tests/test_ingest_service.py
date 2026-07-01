@@ -105,9 +105,48 @@ async def test_null_target_price_stripped(monkeypatch):
             self.chat.completions = type("Completions", (), {})()
             self.chat.completions.create = lambda **_kwargs: FakeCompletion()
 
-    monkeypatch.setattr("services.ingest_service.Cerebras", FakeCerebras)
+    monkeypatch.setattr("services.chunked_extraction_service.Cerebras", FakeCerebras)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("services.chunked_extraction_service.asyncio.to_thread", fake_to_thread)
 
     result = await extract_thesis_from_document(LONG_MEMO.encode("utf-8"), "memo.txt")
     assert "target_price" not in result
     assert "rating" not in result
     assert result["ticker_guess"] == "TSLA"
+
+
+@pytest.mark.asyncio
+async def test_long_document_uses_chunked_extraction(monkeypatch):
+    """Text beyond 4000 chars should use chunked extraction path."""
+    monkeypatch.setattr("services.ingest_service.CEREBRAS_API_KEY", "mock-key")
+    long_text = (
+        "Tesla Inc. annual report section. " * 500
+        + "UNIQUE_MARKER_BEYOND_4000 operating margins above 22% by FY2026."
+    )
+    assert len(long_text) > 12000
+
+    async def fake_chunked(text, page_map=None):
+        assert len(text) > 4000
+        assert "UNIQUE_MARKER_BEYOND_4000" in text
+        return {
+            "ticker_guess": "TSLA",
+            "thesis_points": [
+                {
+                    "id": 1,
+                    "text": "Operating margins above 22% by FY2026",
+                    "metric": "Margins",
+                    "threshold": "22%",
+                }
+            ],
+            "extraction_mode": "chunked",
+            "chunks_processed": 4,
+        }
+
+    monkeypatch.setattr("services.ingest_service.extract_thesis_chunked", fake_chunked)
+    result = await extract_thesis_from_document(long_text.encode("utf-8"), "10k.txt")
+    assert result["extraction_mode"] == "chunked"
+    assert result["chunks_processed"] == 4
+    assert "22%" in result["thesis_points"][0]["text"]

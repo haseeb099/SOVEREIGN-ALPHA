@@ -188,7 +188,7 @@ export function LeftSidebar({
       const result = await ingestDocument(file);
       toast.success(`Ingested ${result.filename}`);
       onIngestResult?.(result.extraction);
-      if (result.extraction?.thesis_points?.length) {
+      if (!onIngestResult && result.extraction?.thesis_points?.length) {
         await analyze();
       }
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -382,7 +382,13 @@ export function LeftSidebar({
           }}
           disabled={isAnalyzing && recalcState !== "running"}
           className="h-8 w-full font-mono text-[10px] uppercase"
-          aria-label={recalcState === "running" ? "Cancel recalculate" : "Recalculate analysis"}
+          aria-label={
+            recalcState === "running" || isAnalyzing
+              ? "Cancel"
+              : recalcState === "done"
+                ? "Complete"
+                : "Recalculate"
+          }
         >
           <RefreshCw className={cn((isAnalyzing || recalcState === "running") && "animate-spin")} />
           {recalcState === "running" || isAnalyzing
@@ -398,6 +404,7 @@ export function LeftSidebar({
             ref={fileInputRef}
             type="file"
             className="sr-only"
+            aria-label={`Upload research document for ${ticker}`}
             accept=".pdf,.txt,.json,.docx"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -420,6 +427,7 @@ export function TerminalTabBar({ ticker }: { ticker: string }) {
   const tabs = [
     { href: `/terminal/${ticker}/memo`, label: "Memo" },
     { href: `/terminal/${ticker}/tracker`, label: "Tracker" },
+    { href: `/terminal/${ticker}/charts`, label: "Charts" },
     { href: `/terminal/${ticker}/copilot`, label: "Copilot" },
   ];
 

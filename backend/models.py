@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,8 +80,21 @@ class IngestedDocument(Base):
     extraction: Mapped[dict] = mapped_column(JSONB)
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     ticker_guess: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class DocumentCorpus(Base):
+    __tablename__ = "document_corpora"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    document_ids: Mapped[list] = mapped_column(JSONB, default=lambda: [])
+    merged_extraction: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class DocumentLibraryItem(Base):
@@ -129,10 +142,17 @@ class Report(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16))
-    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     share_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB)
+    template: Mapped[str] = mapped_column(String(64), default="equity_research")
+    password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    expires_in_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    parent_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    corpus_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    branding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -155,3 +175,45 @@ class ApiKey(Base):
     plan_tier: Mapped[str] = mapped_column(String(32), default="free")
     rate_limit: Mapped[int] = mapped_column(default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), index=True)
+    page: Mapped[int | None] = mapped_column(nullable=True)
+    chunk_text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    goal: Mapped[str] = mapped_column(Text)
+    ticker: Mapped[str] = mapped_column(String(16), default="", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    plan_json: Mapped[dict] = mapped_column(JSONB, default=lambda: {})
+    state_json: Mapped[dict] = mapped_column(JSONB, default=lambda: {})
+    pending_checkpoint: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class MemoFeedback(Base):
+    __tablename__ = "memo_feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    section: Mapped[str] = mapped_column(String(32))
+    vote: Mapped[str] = mapped_column(String(8))
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)

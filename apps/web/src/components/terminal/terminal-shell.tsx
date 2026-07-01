@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Menu, PanelLeft, PanelRight, Search } from "lucide-react";
+import { Menu, PanelLeft, PanelRight, Search, Workflow } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { MacroEvent, MarketSearchResult } from "@sovereign/shared";
 import { AppNav, NavDrawerContent } from "@/components/layout/app-nav";
@@ -15,6 +15,7 @@ import { MacroEventConfirmDialog } from "@/components/terminal/macro-event-confi
 import { MacroNewsTicker } from "@/components/terminal/macro-news-ticker";
 import { RightSidebar } from "@/components/terminal/right-sidebar";
 import { TelemetryFooter } from "@/components/terminal/telemetry-footer";
+import { WorkflowPanel } from "@/components/terminal/workflow-panel";
 import { useTerminalShortcuts } from "@/hooks/use-terminal-shortcuts";
 import { useSystemHealth, useTelemetry } from "@/hooks/use-system-health";
 import { applyMacroEventToScenario } from "@/lib/macro-inject";
@@ -60,10 +61,11 @@ export function TerminalShell({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [workflowOpen, setWorkflowOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { health, status, setWsConnected, lastFetchAt, refresh } = useSystemHealth();
   const { events, connected } = useTelemetry();
-  const { ticker, scenario, setTicker, applyScenarioField, isCached } = useTerminal();
+  const { ticker, scenario, setTicker, applyScenarioField, isCached, onIngestResult, applyWorkflowAnalysis } = useTerminal();
 
   useEffect(() => {
     setTopSearch(ticker);
@@ -148,10 +150,15 @@ export function TerminalShell({
     router.push(`/terminal/${ticker}/tracker`);
   }, [router, ticker]);
 
+  const goToCharts = useCallback(() => {
+    router.push(`/terminal/${ticker}/charts`);
+  }, [router, ticker]);
+
   useTerminalShortcuts({
     onToggleScenario: toggleScenario,
     onShowShortcuts: () => setShortcutsOpen(true),
     onGoToTracker: goToTracker,
+    onGoToCharts: goToCharts,
   });
 
   const handleHealthRefresh = () => {
@@ -166,7 +173,7 @@ export function TerminalShell({
           <Link
             href="/terminal"
             className="font-semibold text-primary transition-colors hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Sovereign Alpha home"
+            aria-label="SA, Sovereign Alpha home"
             title="Sovereign Alpha — Investment Terminal"
           >
             SA
@@ -256,6 +263,17 @@ export function TerminalShell({
         </div>
 
         <Button
+          variant="outline"
+          size="sm"
+          className="hidden h-7 gap-1 px-2 font-mono text-[10px] uppercase md:flex"
+          onClick={() => setWorkflowOpen(true)}
+          aria-label="Run due diligence workflow"
+        >
+          <Workflow className="size-3" aria-hidden />
+          Run DD
+        </Button>
+
+        <Button
           variant="ghost"
           size="sm"
           className="hidden h-7 px-2 text-[10px] text-muted-foreground md:flex"
@@ -281,7 +299,12 @@ export function TerminalShell({
 
       <div className="terminal-workspace min-h-0 flex-1">
         <aside className="terminal-col-left hidden min-h-0 xl:flex">
-          <LeftSidebar collapsed={false} onToggle={() => {}} showCollapse={false} />
+          <LeftSidebar
+            collapsed={false}
+            onToggle={() => {}}
+            showCollapse={false}
+            onIngestResult={onIngestResult}
+          />
         </aside>
 
         <main className="terminal-col-center flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -316,6 +339,7 @@ export function TerminalShell({
             collapsed={false}
             onToggle={() => setLeftOpen(false)}
             onTickerSelect={() => setLeftOpen(false)}
+            onIngestResult={onIngestResult}
             className="h-[calc(100%-3rem)] w-full border-0"
           />
         </SheetContent>
@@ -341,6 +365,26 @@ export function TerminalShell({
       </Sheet>
 
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      <Sheet open={workflowOpen} onOpenChange={setWorkflowOpen}>
+        <SheetContent side="right" className="w-[min(100vw,360px)] p-0" showCloseButton>
+          <SheetHeader className="border-b border-border px-3 py-2">
+            <SheetTitle className="panel-label">Due Diligence Workflow</SheetTitle>
+          </SheetHeader>
+          <div className="h-[calc(100%-3rem)] overflow-y-auto">
+            <WorkflowPanel
+              ticker={ticker}
+              scenario={scenario}
+              onAnalysisReady={(analysis) => {
+                applyWorkflowAnalysis(analysis);
+                if (analysis.ticker !== ticker) {
+                  setTicker(analysis.ticker);
+                }
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

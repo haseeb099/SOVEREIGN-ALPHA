@@ -1,10 +1,12 @@
 """Document library — user-scoped ingested documents."""
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from database import AsyncSessionLocal
 from middleware.auth import extract_user_id
-from models import DocumentLibraryItem, IngestedDocument
+from models import DocumentChunk, DocumentLibraryItem, IngestedDocument
 
 router = APIRouter()
 
@@ -99,6 +101,9 @@ async def delete_document(request: Request, doc_id: str):
         ).scalar_one_or_none()
         if not row or (row.user_id and row.user_id != user_id):
             raise HTTPException(status_code=404, detail="Document not found")
+        await session.execute(
+            delete(DocumentChunk).where(DocumentChunk.document_id == str(row.id))
+        )
         await session.delete(row)
         await session.commit()
         return {"deleted": doc_id}

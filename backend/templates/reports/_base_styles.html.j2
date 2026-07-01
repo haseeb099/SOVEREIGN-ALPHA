@@ -1,0 +1,82 @@
+<style>
+  :root {
+    --ink: #0f172a;
+    --muted: #64748b;
+    --accent: #1d4ed8;
+    --border: #e2e8f0;
+    --bg: #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    margin: 0;
+    background: var(--bg);
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 820px;
+    margin: 0 auto;
+    background: #fff;
+    box-shadow: 0 8px 32px rgba(15,23,42,.08);
+  }
+  .cover {
+    padding: 48px 56px;
+    border-bottom: 4px solid var(--accent);
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+    color: #fff;
+  }
+  .cover h1 { margin: 0 0 8px; font-size: 2rem; }
+  .cover .meta { opacity: .85; font-size: .9rem; }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.15);
+    font-weight: 600;
+    margin-top: 16px;
+  }
+  .body { padding: 40px 56px 56px; }
+  h2 {
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+    margin: 32px 0 16px;
+  }
+  h2:first-child { margin-top: 0; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .kpi {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .kpi .label { font-size: .75rem; color: var(--muted); text-transform: uppercase; }
+  .kpi .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; }
+  th { background: var(--bg); font-weight: 600; }
+  .debate { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .debate .card { border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .debate .bull { border-top: 3px solid #16a34a; }
+  .debate .bear { border-top: 3px solid #dc2626; }
+  .warnings { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px 20px; }
+  .disclaimer {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  @page { margin: 2cm; @bottom-center { content: counter(page); font-size: 10px; color: #64748b; } }
+  @media print { body { background: #fff; } .page { box-shadow: none; } }
+</style>

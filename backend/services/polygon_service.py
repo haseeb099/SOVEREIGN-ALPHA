@@ -95,22 +95,39 @@ async def search_tickers(query: str, limit: int = 10) -> list[dict[str, Any]]:
         return []
     if not POLYGON_API_KEY:
         return _local_search_fallback(q, limit)
+    markets = ("stocks", "etfs", "indices")
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
     try:
-        payload = await _polygon_get(
-            "/v3/reference/tickers",
-            {"search": q, "active": "true", "market": "stocks", "limit": limit},
-        )
-        results = payload.get("results") or []
-        return [
-            {
-                "ticker": r.get("ticker", ""),
-                "name": r.get("name", ""),
-                "market": r.get("market", "stocks"),
-                "type": r.get("type", ""),
-                "sector": r.get("sic_description") or r.get("sector") or None,
-            }
-            for r in results
-        ]
+        for market in markets:
+            if len(merged) >= limit:
+                break
+            payload = await _polygon_get(
+                "/v3/reference/tickers",
+                {
+                    "search": q,
+                    "active": "true",
+                    "market": market,
+                    "limit": limit,
+                },
+            )
+            for r in payload.get("results") or []:
+                ticker = r.get("ticker", "")
+                if not ticker or ticker in seen:
+                    continue
+                seen.add(ticker)
+                merged.append(
+                    {
+                        "ticker": ticker,
+                        "name": r.get("name", ""),
+                        "market": r.get("market", market),
+                        "type": r.get("type", ""),
+                        "sector": r.get("sic_description") or r.get("sector") or None,
+                    }
+                )
+                if len(merged) >= limit:
+                    break
+        return merged[:limit]
     except PolygonRateLimitError:
         raise
     except Exception as exc:
@@ -170,6 +187,27 @@ def _local_search_fallback(query: str, limit: int) -> list[dict[str, Any]]:
     return matches[:limit]
 
 
+def _bar_from_agg(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Polygon aggregate or yfinance row to OHLCV bar."""
+    if "t" in row:
+        return {
+            "date": time.strftime("%Y-%m-%d", time.gmtime(row["t"] / 1000)),
+            "open": round(float(row.get("o", row.get("c", 0))), 4),
+            "high": round(float(row.get("h", row.get("c", 0))), 4),
+            "low": round(float(row.get("l", row.get("c", 0))), 4),
+            "close": round(float(row.get("c", 0)), 4),
+            "volume": int(row.get("v", 0) or 0),
+        }
+    return {
+        "date": row.get("date", ""),
+        "open": round(float(row.get("open", row.get("close", 0))), 4),
+        "high": round(float(row.get("high", row.get("close", 0))), 4),
+        "low": round(float(row.get("low", row.get("close", 0))), 4),
+        "close": round(float(row.get("close", 0)), 4),
+        "volume": int(row.get("volume", 0) or 0),
+    }
+
+
 async def get_snapshot(ticker: str) -> Optional[dict[str, Any]]:
     global _last_fetch_at
     symbol = ticker.upper()
@@ -180,11 +218,16 @@ async def get_snapshot(ticker: str) -> Optional[dict[str, Any]]:
         tick = payload.get("ticker") or {}
         day = tick.get("day") or {}
         prev = tick.get("prevDay") or {}
+        last_quote = tick.get("lastQuote") or {}
         price = tick.get("lastTrade", {}).get("p") or day.get("c") or prev.get("c")
         if not price:
             return None
         prev_close = prev.get("c") or price
         change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
+        bid = last_quote.get("p")
+        ask = last_quote.get("P")
+        bid_size = last_quote.get("s")
+        ask_size = last_quote.get("S")
         _last_fetch_at = time.time()
         return {
             "asset_key": symbol,
@@ -195,6 +238,10 @@ async def get_snapshot(ticker: str) -> Optional[dict[str, Any]]:
             "change_pct": round(change_pct, 2),
             "is_positive": change_pct >= 0,
             "volatility_30d": round(abs(change_pct) * 3.5, 1),
+            "bid": round(float(bid), 4) if bid is not None else None,
+            "ask": round(float(ask), 4) if ask is not None else None,
+            "bid_size": int(bid_size) if bid_size is not None else None,
+            "ask_size": int(ask_size) if ask_size is not None else None,
             "source": "polygon",
             "fetched_at": _last_fetch_at,
         }
@@ -203,6 +250,64 @@ async def get_snapshot(ticker: str) -> Optional[dict[str, Any]]:
     except Exception as exc:
         logger.warning("Polygon snapshot failed for %s: %s", symbol, exc)
         return None
+
+
+async def get_depth(ticker: str) -> dict[str, Any]:
+    """Bid/ask depth from Polygon snapshot (REST MVP)."""
+    symbol = ticker.upper()
+    snapshot = await get_snapshot(symbol)
+    if not snapshot or snapshot.get("bid") is None or snapshot.get("ask") is None:
+        from services.market_service import _demo_history_bars
+
+        bars = _demo_history_bars(symbol, "1m")
+        mid = float(bars[-1]["close"]) if bars else 100.0
+        spread = round(mid * 0.0008, 4)
+        bid = round(mid - spread / 2, 4)
+        ask = round(mid + spread / 2, 4)
+        return {
+            "ticker": symbol,
+            "bid": bid,
+            "ask": ask,
+            "spread": spread,
+            "spread_pct": round((spread / mid) * 100, 4) if mid else None,
+            "bid_size": 1200,
+            "ask_size": 980,
+            "levels": [
+                {"side": "bid", "price": bid, "size": 1200},
+                {"side": "ask", "price": ask, "size": 980},
+            ],
+            "source": "fallback",
+        }
+
+    bid = snapshot.get("bid")
+    ask = snapshot.get("ask")
+    bid_size = snapshot.get("bid_size")
+    ask_size = snapshot.get("ask_size")
+    spread = None
+    spread_pct = None
+    if bid is not None and ask is not None:
+        spread = round(float(ask) - float(bid), 4)
+        mid = (float(ask) + float(bid)) / 2
+        spread_pct = round(spread / mid * 100, 4) if mid else None
+
+    levels: list[dict[str, Any]] = []
+    if bid is not None:
+        levels.append({"side": "bid", "price": bid, "size": bid_size or 0})
+    if ask is not None:
+        levels.append({"side": "ask", "price": ask, "size": ask_size or 0})
+
+    return {
+        "ticker": symbol,
+        "bid": bid,
+        "ask": ask,
+        "spread": spread,
+        "spread_pct": spread_pct,
+        "bid_size": bid_size,
+        "ask_size": ask_size,
+        "levels": levels,
+        "source": snapshot.get("source", "polygon"),
+        "fetched_at": snapshot.get("fetched_at"),
+    }
 
 
 async def get_price_history(ticker: str, range_key: str = "1y") -> list[dict[str, Any]]:
@@ -221,10 +326,7 @@ async def get_price_history(ticker: str, range_key: str = "1y") -> list[dict[str
             {"adjusted": "true", "sort": "asc"},
         )
         results = payload.get("results") or []
-        return [
-            {"date": time.strftime("%Y-%m-%d", time.gmtime(r["t"] / 1000)), "close": r["c"]}
-            for r in results
-        ]
+        return [_bar_from_agg(r) for r in results]
     except Exception as exc:
         logger.warning("Polygon history failed for %s: %s", symbol, exc)
         return await _yfinance_history(symbol, days)
@@ -239,10 +341,20 @@ async def _yfinance_history(symbol: str, days: int) -> list[dict[str, Any]]:
 
     def _sync():
         hist = yf.Ticker(symbol).history(period=period)
-        return [
-            {"date": idx.strftime("%Y-%m-%d"), "close": round(float(row["Close"]), 4)}
-            for idx, row in hist.iterrows()
-        ]
+        bars: list[dict[str, Any]] = []
+        for idx, row in hist.iterrows():
+            close = round(float(row["Close"]), 4)
+            bars.append(
+                {
+                    "date": idx.strftime("%Y-%m-%d"),
+                    "open": round(float(row.get("Open", close)), 4),
+                    "high": round(float(row.get("High", close)), 4),
+                    "low": round(float(row.get("Low", close)), 4),
+                    "close": close,
+                    "volume": int(row.get("Volume", 0) or 0),
+                }
+            )
+        return bars
 
     loop = asyncio.get_event_loop()
     try:

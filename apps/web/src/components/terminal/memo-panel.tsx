@@ -15,6 +15,7 @@ import {
 import type { AnalyzeResponse, Memo } from "@sovereign/shared";
 import { fetchMarketHistory } from "@/lib/api";
 import { AgentReasoningPanel } from "@/components/terminal/agent-reasoning-panel";
+import { getAgentConfidence, resolveAgentTraces } from "@/components/terminal/pipeline-trace-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -127,7 +128,15 @@ export function PriceHistoryChart({ ticker }: { ticker: string }) {
   return (
     <div className="terminal-panel">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <p className="panel-label">Price History</p>
+        <div className="flex items-center gap-2">
+          <p className="panel-label">Price History</p>
+          <Link
+            href={`/terminal/${ticker}/charts`}
+            className="font-mono text-[9px] text-primary hover:underline"
+          >
+            Full charts →
+          </Link>
+        </div>
         <div className="flex gap-1" role="tablist" aria-label="Price history range">
           {HISTORY_RANGES.map((r) => (
             <button
@@ -307,11 +316,19 @@ export function FanChart({ memo, spot, ticker }: { memo: Memo; spot: number; tic
 
 export function VerdictCards({
   memo,
-  rawAgents,
+  analysis,
+  bullFeedback,
+  bearFeedback,
 }: {
   memo: Memo;
-  rawAgents?: AnalyzeResponse["raw_agents"];
+  analysis?: Pick<AnalyzeResponse, "raw_agents" | "agent_traces">;
+  bullFeedback?: React.ReactNode;
+  bearFeedback?: React.ReactNode;
 }) {
+  const traces = analysis ? resolveAgentTraces(analysis) : [];
+  const bullTrace = traces.find((t) => t.agent === "BULL");
+  const bearTrace = traces.find((t) => t.agent === "RED_TEAM");
+
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <AgentReasoningPanel
@@ -319,15 +336,21 @@ export function VerdictCards({
         variant="bull"
         verdict={memo.bull_verdict}
         agentKey="bull"
-        rawAgents={rawAgents}
+        rawAgents={analysis?.raw_agents}
+        agentTrace={bullTrace}
+        feedbackSlot={bullFeedback}
       />
       <AgentReasoningPanel
         title="Bear Case"
         variant="bear"
         verdict={memo.bear_verdict}
         agentKey="red_team"
-        rawAgents={rawAgents}
+        rawAgents={analysis?.raw_agents}
+        agentTrace={bearTrace}
+        feedbackSlot={bearFeedback}
       />
     </div>
   );
 }
+
+export { getAgentConfidence, resolveAgentTraces };

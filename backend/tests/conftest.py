@@ -48,6 +48,8 @@ ANALYZE_SCHEMA_KEYS = {
     "sovereign_score",
     "sovereign_score_detail",
     "last_updated",
+    "agent_traces",
+    "retrieved_chunk_count",
 }
 
 # Keys returned by POST /api/analyze after enrichment
@@ -101,12 +103,26 @@ def sample_scenario():
 
 def _agent_json_for_prompt(system_prompt: str) -> dict:
     """Return deterministic mock JSON per agent system prompt."""
+    base_cite = {
+        "chunk_id": "market-TSLA",
+        "source_type": "market",
+        "source_label": "Polygon live quote",
+        "source_date": "2026-06-30",
+        "data_point": "TSLA $185.20 (+2.4%)",
+    }
+    trace_base = {
+        "confidence": 7.0,
+        "insufficient_data": False,
+        "citations": [base_cite],
+        "reasoning_steps": ["Reviewed market data", "Applied scenario assumptions"],
+    }
     if "Fundamental Analysis Agent" in system_prompt:
         return {
             "agent": "FUNDAMENTAL",
             "score": 7.2,
             "margin_assessment": "Margins stable",
             "log_message": "Fundamental analysis complete",
+            **trace_base,
         }
     if "Macro Intelligence Agent" in system_prompt:
         return {
@@ -114,6 +130,7 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             "macro_score": 6.5,
             "geopolitical_risk": "Medium",
             "log_message": "Macro analysis complete",
+            **trace_base,
         }
     if "Bull Case Agent" in system_prompt:
         return {
@@ -122,6 +139,7 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             "price_target": 240.0,
             "confidence_band": [210, 270],
             "log_message": "Bull case built",
+            **trace_base,
         }
     if "Red Team Adversarial Agent" in system_prompt:
         return {
@@ -129,6 +147,27 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             "verdict": "Margin compression and competition remain risks.",
             "bear_price_target": 140.0,
             "log_message": "Red team complete",
+            **trace_base,
+        }
+    if "Planning Agent" in system_prompt:
+        return {
+            "ticker": "TSLA",
+            "goal_summary": "Full due diligence on TSLA",
+            "steps": [
+                {"id": "fetch_edgar", "tool": "edgar", "params": {"form": "10-K"}},
+                {"id": "web_search", "tool": "web_search", "params": {"query": "TSLA risks"}},
+                {"id": "analyze", "tool": "analysis_pipeline"},
+                {"id": "report", "tool": "generate_report", "params": {"template": "due_diligence"}},
+            ],
+            "requires_hitl": ["fetch_edgar", "analyze", "report"],
+        }
+    if "Verification Agent" in system_prompt:
+        return {
+            "passed": True,
+            "contradictions": [],
+            "confidence_adjustment": 0.0,
+            "recommendation": "proceed",
+            "log_message": "Verification complete",
         }
     if "Synthesis Agent" in system_prompt:
         return {
@@ -156,8 +195,9 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             ],
             "audit_warnings": [],
             "log_message": "Final synthesis complete — rating: BULLISH",
+            **trace_base,
         }
-    return {"agent": "TEST", "log_message": "mock"}
+    return {"agent": "TEST", "log_message": "mock", **trace_base}
 
 
 @pytest.fixture
@@ -167,7 +207,19 @@ def mock_cerebras_agent(monkeypatch):
     def fake_call(_client, system_prompt: str, _user_message: str) -> dict:
         return _agent_json_for_prompt(system_prompt)
 
+    monkeypatch.setattr("agents.base._call_agent", fake_call)
+    monkeypatch.setattr("agents.base.call_agent", fake_call)
     monkeypatch.setattr("agents.pipeline._call_agent", fake_call)
+    for mod in (
+        "fundamental_agent",
+        "macro_agent",
+        "bull_agent",
+        "red_team_agent",
+        "synthesis_agent",
+        "planning_agent",
+        "verification_agent",
+    ):
+        monkeypatch.setattr(f"agents.{mod}._call_agent", fake_call)
     return fake_call
 
 
@@ -212,7 +264,12 @@ def mock_cerebras_client(monkeypatch):
                 )
             )
 
-    monkeypatch.setattr("services.ingest_service.Cerebras", FakeCerebras)
+    monkeypatch.setattr("services.chunked_extraction_service.Cerebras", FakeCerebras)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("services.chunked_extraction_service.asyncio.to_thread", fake_to_thread)
     return FakeCerebras
 
 
@@ -233,6 +290,14 @@ def mock_persistence(monkeypatch):
     )
     monkeypatch.setattr(
         "routers.analyze.evaluate_rules_for_ticker",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "routers.analyze.index_market_snapshot",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "routers.analyze.retrieve",
         AsyncMock(return_value=[]),
     )
 
@@ -274,4 +339,22 @@ def sample_pipeline_result(sample_market_data, sample_scenario):
         ],
         "agent_logs": [],
         "raw_agents": {},
+        "agent_traces": [
+            {
+                "agent": "SYNTHESIS",
+                "confidence": 7.5,
+                "insufficient_data": False,
+                "citations": [
+                    {
+                        "chunk_id": "market-TSLA",
+                        "source_type": "market",
+                        "source_label": "Polygon live quote",
+                        "source_date": "2026-06-30",
+                        "data_point": "TSLA $185.20",
+                    }
+                ],
+                "log_message": "Final synthesis complete",
+            }
+        ],
+        "retrieved_chunk_count": 0,
     }

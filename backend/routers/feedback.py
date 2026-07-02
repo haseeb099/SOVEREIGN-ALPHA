@@ -1,4 +1,4 @@
-"""POST /api/feedback — user feedback on memo sections."""
+"""POST /api/feedback — user feedback on memo sections (auth required)."""
 import logging
 import uuid
 from typing import Optional
@@ -8,8 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from database import AsyncSessionLocal
-from middleware.auth import extract_user_id
+from middleware.auth import require_auth
 from models import MemoFeedback
+from services.audit_service import record_event
+from services.permission_service import get_org_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +30,9 @@ class FeedbackRequest(BaseModel):
 
 @router.post("/feedback")
 async def submit_feedback(body: FeedbackRequest, request: Request):
+    user_id = require_auth(request)
+    org_id = get_org_id(request)
+
     section = body.section.lower()
     vote = body.vote.lower()
     if section not in VALID_SECTIONS:
@@ -35,7 +40,6 @@ async def submit_feedback(body: FeedbackRequest, request: Request):
     if vote not in VALID_VOTES:
         raise HTTPException(status_code=400, detail=f"Invalid vote. Allowed: {VALID_VOTES}")
 
-    user_id = extract_user_id(request) or getattr(request.state, "user_id", None)
     analysis_uuid = None
     if body.analysis_id:
         try:
@@ -55,6 +59,14 @@ async def submit_feedback(body: FeedbackRequest, request: Request):
             )
             session.add(row)
             await session.commit()
+            await record_event(
+                org_id=org_id,
+                actor_id=user_id,
+                action="feedback.submit",
+                resource_type="memo_feedback",
+                resource_id=str(row.id),
+                payload={"ticker": body.ticker.upper(), "section": section, "vote": vote},
+            )
             return {"id": str(row.id), "status": "recorded"}
     except SQLAlchemyError as e:
         logger.warning("Feedback persist failed: %s", e)

@@ -1,5 +1,6 @@
 """Shared helpers for Cerebras agent calls and citation validation."""
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -9,6 +10,9 @@ from cerebras_config import CEREBRAS_API_KEY, CEREBRAS_MODEL
 
 MODEL = CEREBRAS_MODEL
 MIN_RETRIEVED_CHUNKS = 2
+AGENT_CALL_TIMEOUT_S = 45
+
+logger = logging.getLogger(__name__)
 
 _CITATION_FIELDS = """
   "confidence": 7.5,
@@ -50,8 +54,20 @@ def call_agent(client: Cerebras, system_prompt: str, user_message: str) -> dict:
         response_format={"type": "json_object"},
         max_tokens=1200,
         temperature=0.3,
+        timeout=45,
     )
-    return json.loads(response.choices[0].message.content)
+    raw = response.choices[0].message.content or "{}"
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("Agent returned non-JSON response: %s", exc)
+        return {
+            "error": "invalid_json",
+            "log_message": "Agent response could not be parsed",
+            "confidence": 3.0,
+            "insufficient_data": True,
+            "insufficient_reason": "Malformed model output",
+        }
 
 
 # Backward-compatible alias for tests patching agents.pipeline._call_agent
@@ -108,13 +124,24 @@ def validate_citations(
     return agent_output
 
 
+_RESEARCH_AGENT_ENUM = {
+    "company_research": "COMPANY_RESEARCH",
+    "sector_macro_research": "SECTOR_MACRO",
+    "competitive_analysis": "COMPETITIVE",
+    "esg_compliance": "ESG",
+    "insider_sentiment": "INSIDER",
+    "options_flow": "OPTIONS_FLOW",
+    "verification": "VERIFICATION",
+}
+
+
 def build_agent_trace(
     agent_key: str,
     agent_output: dict,
     elapsed_ms: float | None = None,
 ) -> dict:
     """Map raw agent JSON to AgentTrace contract."""
-    agent_enum = agent_key.upper()
+    agent_enum = _RESEARCH_AGENT_ENUM.get(agent_key, agent_key.upper())
     if agent_key == "red_team":
         agent_enum = "RED_TEAM"
 
@@ -162,6 +189,8 @@ def build_analysis_context(
     retrieved_sources: str,
     thesis_points: Optional[list] = None,
     prior_analyses: Optional[str] = None,
+    research_brief: Optional[str] = None,
+    red_team_signals: Optional[dict] = None,
 ) -> str:
     """Build shared user-message context for analysis agents."""
     context = f"""
@@ -179,6 +208,10 @@ Scenario Parameters:
 
 {retrieved_sources}
 """
+    if research_brief:
+        context += f"\n{research_brief}\n"
+    if red_team_signals:
+        context += f"\nRED_TEAM_SIGNALS:\n{json.dumps(red_team_signals, indent=2)}\n"
     if prior_analyses:
         context += f"\n{prior_analyses}\n"
     if thesis_points:

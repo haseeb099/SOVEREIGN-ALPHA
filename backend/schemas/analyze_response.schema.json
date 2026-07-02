@@ -106,6 +106,8 @@
       "items": { "type": "object" }
     },
     "raw_agents": { "type": "object" },
+    "research_brief": { "type": "string" },
+    "research_results": { "type": "object" },
     "agent_traces": {
       "type": "array",
       "items": {
@@ -114,7 +116,11 @@
         "properties": {
           "agent": {
             "type": "string",
-            "enum": ["FUNDAMENTAL", "MACRO", "BULL", "RED_TEAM", "SYNTHESIS"]
+            "enum": [
+              "FUNDAMENTAL", "MACRO", "BULL", "RED_TEAM", "SYNTHESIS",
+              "COMPANY_RESEARCH", "SECTOR_MACRO", "COMPETITIVE", "ESG", "INSIDER", "OPTIONS_FLOW",
+              "VERIFICATION"
+            ]
           },
           "confidence": { "type": "number", "minimum": 0, "maximum": 10 },
           "insufficient_data": { "type": "boolean" },

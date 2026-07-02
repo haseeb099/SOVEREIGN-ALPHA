@@ -31,11 +31,18 @@ def _default_plan(goal: str, ticker: str) -> dict:
         "goal_summary": goal[:200],
         "steps": [
             {"id": "fetch_edgar", "tool": "edgar", "params": {"form": "10-K"}},
+            {"id": "fetch_10q", "tool": "edgar", "params": {"form": "10-Q"}},
+            {"id": "fetch_8k", "tool": "edgar", "params": {"form": "8-K"}},
+            {"id": "insider", "tool": "insider"},
+            {"id": "options", "tool": "options"},
+            {"id": "esg", "tool": "esg"},
+            {"id": "peers", "tool": "peers"},
             {
                 "id": "web_search",
                 "tool": "web_search",
                 "params": {"query": f"{ticker} investment risks outlook 2026"},
             },
+            {"id": "research_agents", "tool": "research_agents"},
             {"id": "analyze", "tool": "analysis_pipeline"},
             {"id": "report", "tool": "generate_report", "params": {"template": "due_diligence"}},
         ],

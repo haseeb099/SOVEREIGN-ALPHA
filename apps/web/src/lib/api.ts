@@ -11,6 +11,8 @@ import {
   PortfolioSummarySchema,
   ScenarioPreviewResponseSchema,
   WatchlistSchema,
+  WatcherStatusSchema,
+  FilingWatchSubscriptionSchema,
   WorkflowStatusSchema,
   type AlertNotification,
   type AlertRule,
@@ -34,6 +36,8 @@ import {
   type ScenarioPreviewResponse,
   type TickerNewsResponse,
   type Watchlist,
+  type WatcherStatus,
+  type FilingWatchSubscription,
   type WorkflowStatus,
   CalendarEventSchema,
   MacroEventSchema,
@@ -41,6 +45,27 @@ import {
   MarketIndicatorsSchema,
   RiskMetricsSchema,
   TickerNewsResponseSchema,
+  FinancialSnapshotSchema,
+  DcfResultSchema,
+  CompsResultSchema,
+  LboResultSchema,
+  MonteCarloResultSchema,
+  SensitivityGridSchema,
+  ValuationLabSnapshotSchema,
+  PortfolioRiskResultSchema,
+  FinancialNLScenarioResponseSchema,
+  type FinancialSnapshot,
+  type DcfResult,
+  type CompsResult,
+  type LboResult,
+  type MonteCarloResult,
+  type SensitivityGrid,
+  type ValuationLabSnapshot,
+  type PortfolioRiskResult,
+  type FinancialNLScenarioResponse,
+  type DcfAssumptions,
+  type LboAssumptions,
+  type MonteCarloConfig,
 } from "@sovereign/shared";
 import { ApiError, apiErrorFromResponse, classifyFetchError } from "@/lib/api-errors";
 
@@ -56,7 +81,7 @@ function resolveApiBase(): string {
 const API_BASE = resolveApiBase();
 
 const REQUEST_TIMEOUT_MS = 10_000;
-const ANALYZE_TIMEOUT_MS = 90_000;
+const ANALYZE_TIMEOUT_MS = 120_000;
 const WORKFLOW_TIMEOUT_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 20_000;
 
@@ -369,11 +394,22 @@ export async function fetchMacroEvents(ticker: string): Promise<MacroEvent[]> {
   return data.events ?? [];
 }
 
+export type HistoryItem = {
+  id: string;
+  ticker: string;
+  scenario?: Scenario;
+  memo?: AnalyzeResponse["memo"];
+  thesis_points?: AnalyzeResponse["thesis_points"];
+  sovereign_score?: number;
+  pipeline_elapsed_seconds?: number;
+  created_at: string;
+};
+
 export async function runAnalysis(
   ticker: string,
   scenario: Scenario,
   thesisPoints?: AnalyzeResponse["thesis_points"],
-  options?: { corpus_id?: string },
+  options?: { corpus_id?: string; enable_research?: boolean },
 ): Promise<AnalyzeResponse> {
   try {
     const res = await fetchWithTimeout(
@@ -385,6 +421,7 @@ export async function runAnalysis(
           ticker,
           scenario,
           thesis_points: thesisPoints,
+          enable_research: options?.enable_research ?? false,
           ...(options?.corpus_id ? { corpus_id: options.corpus_id } : {}),
         }),
       },
@@ -544,7 +581,7 @@ export async function fetchHistory(ticker: string) {
   return apiFetch<{
     ticker: string;
     count: number;
-    items: { id: string; created_at: string; result: AnalyzeResponse }[];
+    items: HistoryItem[];
   }>(`/api/history/${ticker}?limit=10`);
 }
 
@@ -948,4 +985,201 @@ export async function rejectWorkflow(workflowId: string): Promise<WorkflowStatus
     if (err instanceof ApiError) throw err;
     throw classifyFetchError(err);
   }
+}
+
+export async function fetchWatcherStatus(): Promise<WatcherStatus | null> {
+  try {
+    const data = await apiFetch<unknown>("/api/watchers/status");
+    return WatcherStatusSchema.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function subscribeFilingWatcher(
+  ticker: string,
+  forms: string[] = ["10-Q", "8-K", "10-K", "4"],
+): Promise<FilingWatchSubscription> {
+  const data = await apiFetch<unknown>("/api/watchers/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ ticker: ticker.toUpperCase(), forms }),
+  });
+  return FilingWatchSubscriptionSchema.parse(data);
+}
+
+export async function unsubscribeFilingWatcher(subscriptionId: string) {
+  return apiFetch<{ deleted: string }>(`/api/watchers/subscribe/${subscriptionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function pollWatchersNow() {
+  return apiFetch<{ status: string; polled_at?: string }>("/api/watchers/poll-now", {
+    method: "POST",
+  });
+}
+
+export async function fetchFinancialSnapshot(ticker: string) {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/financials`);
+  return FinancialSnapshotSchema.parse(data);
+}
+
+export async function runDcfValuation(
+  ticker: string,
+  assumptions?: Partial<DcfAssumptions>,
+  useAgent = false,
+): Promise<DcfResult> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/dcf`, {
+    method: "POST",
+    body: JSON.stringify({ assumptions, use_agent: useAgent }),
+  });
+  return DcfResultSchema.parse(data);
+}
+
+export async function runCompsValuation(
+  ticker: string,
+  peers?: { ticker: string; name?: string }[],
+  useAgent = false,
+): Promise<CompsResult> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/comps`, {
+    method: "POST",
+    body: JSON.stringify({ peers, use_agent: useAgent }),
+  });
+  return CompsResultSchema.parse(data);
+}
+
+export async function runLboValuation(
+  ticker: string,
+  assumptions?: Record<string, number>,
+): Promise<LboResult> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/lbo`, {
+    method: "POST",
+    body: JSON.stringify({ assumptions }),
+  });
+  return LboResultSchema.parse(data);
+}
+
+export async function runMonteCarloValuation(
+  ticker: string,
+  config?: Record<string, unknown>,
+  baseAssumptions?: Partial<DcfAssumptions>,
+): Promise<MonteCarloResult> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/monte-carlo`, {
+    method: "POST",
+    body: JSON.stringify({ config, base_assumptions: baseAssumptions }),
+  });
+  return MonteCarloResultSchema.parse(data);
+}
+
+export async function runSensitivityGrid(
+  ticker: string,
+  assumptions?: Partial<DcfAssumptions>,
+): Promise<SensitivityGrid> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/sensitivity`, {
+    method: "POST",
+    body: JSON.stringify({ assumptions }),
+  });
+  return SensitivityGridSchema.parse(data);
+}
+
+export async function generateValuationLab(
+  ticker: string,
+  useLlm = false,
+  researchResults?: Record<string, unknown>,
+): Promise<ValuationLabSnapshot> {
+  const data = await apiFetch<unknown>(`/api/valuation/${ticker}/generate`, {
+    method: "POST",
+    body: JSON.stringify({ use_llm: useLlm, research_results: researchResults }),
+  });
+  return ValuationLabSnapshotSchema.parse(data);
+}
+
+export async function parseFinancialNlScenario(text: string): Promise<FinancialNLScenarioResponse> {
+  const data = await apiFetch<unknown>("/api/valuation/nl-scenario", {
+    method: "POST",
+    body: JSON.stringify({ text, mode: "financial" }),
+  });
+  return FinancialNLScenarioResponseSchema.parse(data);
+}
+
+export async function fetchPortfolioRisk(): Promise<PortfolioRiskResult | null> {
+  try {
+    const data = await apiFetch<unknown>("/api/risk/portfolio");
+    return PortfolioRiskResultSchema.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function joinWaitlist(payload: {
+  email: string;
+  role?: string;
+  source?: string;
+}): Promise<{ status: string; email: string }> {
+  return apiFetch("/api/waitlist", {
+    method: "POST",
+    body: JSON.stringify({
+      email: payload.email,
+      role: payload.role ?? "analyst",
+      source: payload.source ?? "landing",
+    }),
+  });
+}
+
+export async function applyBeta(body: {
+  email: string;
+  name: string;
+  firm: string;
+  role?: string;
+  use_case: string;
+}): Promise<{ status: string; application_id?: string }> {
+  return apiFetch("/api/beta/apply", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function verifyBetaInvite(
+  invite_code: string,
+): Promise<{ status: string; plan_tier: string }> {
+  return apiFetch("/api/beta/verify", {
+    method: "POST",
+    body: JSON.stringify({ invite_code }),
+  });
+}
+
+export async function submitEnterpriseLead(body: {
+  firm: string;
+  email: string;
+  aum_band?: string;
+  message?: string;
+}): Promise<{ status: string }> {
+  return apiFetch("/api/enterprise/leads", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function completeOnboarding(payload: {
+  ticker?: string;
+  steps_completed?: number;
+}): Promise<{ status: string }> {
+  return apiFetch("/api/onboarding/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      ticker: payload.ticker ?? "TSLA",
+      steps_completed: payload.steps_completed ?? 4,
+    }),
+  });
+}
+
+export async function fetchBillingStatus(): Promise<{
+  plan_tier: string;
+  stripe_customer_id: string | null;
+}> {
+  return apiFetch("/api/billing/status");
+}
+
+export async function startBillingCheckout(): Promise<{ checkout_url: string }> {
+  return apiFetch("/api/billing/checkout", { method: "POST", body: "{}" });
 }

@@ -9,6 +9,7 @@ import { useTerminal } from "@/providers/terminal-provider";
 import {
   createWatchlist,
   fetchAssets,
+  fetchMarket,
   fetchMarketSearch,
   fetchWatchlists,
   ingestDocument,
@@ -44,7 +45,7 @@ export function LeftSidebar({
   showCollapse?: boolean;
 }) {
   const router = useRouter();
-  const { ticker, setTicker, analysis, isAnalyzing, analyze, lastUpdated } =
+  const { ticker, setTicker, analysis, isAnalyzing, analyze, lastUpdated, error } =
     useTerminal();
   const [assets, setAssets] = useState<{ key: string; full_name: string }[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(true);
@@ -61,6 +62,7 @@ export function LeftSidebar({
   const abortRef = useRef<AbortController | null>(null);
   const [watchlistId, setWatchlistId] = useState<string | null>(null);
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
+  const [marketPrices, setMarketPrices] = useState<Record<string, { price: number; change_pct: number }>>({});
   const watchlistInitRef = useRef(false);
 
   const loadWatchlist = useCallback(async (assetKeys: string[]) => {
@@ -124,6 +126,32 @@ export function LeftSidebar({
     return list;
   }, [assets, watchlistTickers, ticker]);
 
+  useEffect(() => {
+    const symbols = displayAssets.map((a) => a.key).slice(0, 12);
+    if (!symbols.length) return;
+    let cancelled = false;
+    void Promise.all(
+      symbols.map(async (sym) => {
+        try {
+          const data = await fetchMarket(sym);
+          return { sym, price: data.price, change_pct: data.change_pct };
+        } catch {
+          return null;
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, { price: number; change_pct: number }> = {};
+      for (const row of results) {
+        if (row) next[row.sym] = { price: row.price, change_pct: row.change_pct };
+      }
+      setMarketPrices((prev) => ({ ...prev, ...next }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayAssets]);
+
   const toggleWatchlistTicker = async (symbol: string) => {
     if (!watchlistId) {
       toast.info("Watchlist is local-only — sign in to sync across devices");
@@ -154,6 +182,13 @@ export function LeftSidebar({
   useEffect(() => {
     setSearch(ticker);
   }, [ticker]);
+
+  useEffect(() => {
+    if (error && recalcState !== "idle") {
+      setRecalcState("idle");
+      setRecalcProgress(0);
+    }
+  }, [error, recalcState]);
 
   const selectTicker = useCallback(
     (t: string) => {
@@ -301,6 +336,19 @@ export function LeftSidebar({
                 >
                   <div className="font-mono font-semibold">{a.key}</div>
                   <div className="truncate text-muted-foreground">{a.full_name}</div>
+                  {marketPrices[a.key] && (
+                    <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px]">
+                      <span>${marketPrices[a.key]!.price.toFixed(2)}</span>
+                      <span
+                        className={cn(
+                          marketPrices[a.key]!.change_pct >= 0 ? "ticker-up" : "ticker-down",
+                        )}
+                      >
+                        {marketPrices[a.key]!.change_pct >= 0 ? "+" : ""}
+                        {marketPrices[a.key]!.change_pct.toFixed(2)}%
+                      </span>
+                    </div>
+                  )}
                 </button>
                 {watchlistId && (
                   <Button
@@ -426,6 +474,8 @@ export function TerminalTabBar({ ticker }: { ticker: string }) {
   const pathname = usePathname();
   const tabs = [
     { href: `/terminal/${ticker}/memo`, label: "Memo" },
+    { href: `/terminal/${ticker}/dossier`, label: "Dossier" },
+    { href: `/terminal/${ticker}/lab`, label: "Lab" },
     { href: `/terminal/${ticker}/tracker`, label: "Tracker" },
     { href: `/terminal/${ticker}/charts`, label: "Charts" },
     { href: `/terminal/${ticker}/copilot`, label: "Copilot" },

@@ -40,9 +40,11 @@ async def run(state: AnalysisState) -> dict:
         await on_log({"agent": "RED_TEAM", "message": f"Running red_team agent for {state['ticker']}..."})
 
     try:
-        user_msg = (
-            f"Attack this bull case:\n{json.dumps(results.get('bull', {}))}\n\nContext:\n{context}"
-        )
+        signals = state.get("red_team_signals") or {}
+        user_msg = f"Attack this bull case:\n{json.dumps(results.get('bull', {}))}\n\n"
+        if signals:
+            user_msg += f"Research signals to exploit:\n{json.dumps(signals, indent=2)}\n\n"
+        user_msg += f"Context:\n{context}"
         output = await loop.run_in_executor(None, _call_agent, client, SYSTEM_PROMPT, user_msg)
         output = _apply_insufficient_data_rule(
             output, len(state.get("retrieved_chunks") or []), state.get("has_market", False)

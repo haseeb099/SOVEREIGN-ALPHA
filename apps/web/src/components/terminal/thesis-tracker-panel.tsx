@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { Loader2, Pencil, Trash2, CheckCircle2, BarChart3, ChevronDown, ChevronUp, History, X } from "lucide-react";
 import type { HealthHistoryPoint, HistoryDiff, ThesisPoint } from "@sovereign/shared";
-import { fetchHealthHistory, fetchHistory, fetchHistoryDiff } from "@/lib/api";
+import { fetchHealthHistory, fetchHistory, fetchHistoryDiff, type HistoryItem } from "@/lib/api";
 import { SAMPLE_THESIS_POINTS } from "@/lib/sample-thesis";
 import { formatTimestamp } from "@/lib/format";
 import { ApiErrorState } from "@/components/ui/api-error-state";
@@ -131,10 +131,10 @@ export function ThesisTrackerPanel({
 }) {
   const [diff, setDiff] = useState<HistoryDiff | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [historyItems, setHistoryItems] = useState<
-    { id: string; created_at: string; memo?: { rating?: string; price_target?: number } }[]
-  >([]);
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [hydratedPoints, setHydratedPoints] = useState<ThesisPoint[]>([]);
   const [localPoints, setLocalPoints] = useState<ThesisPoint[]>(points);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
@@ -142,6 +142,15 @@ export function ThesisTrackerPanel({
   useEffect(() => {
     setLocalPoints(points);
   }, [points]);
+
+  useEffect(() => {
+    if (!points.length && historyItems.length > 0) {
+      const latest = historyItems.find((item) => item.thesis_points?.length);
+      if (latest?.thesis_points?.length) {
+        setLocalPoints(latest.thesis_points);
+      }
+    }
+  }, [points.length, historyItems]);
 
   useEffect(() => {
     try {
@@ -161,15 +170,31 @@ export function ThesisTrackerPanel({
   };
 
   useEffect(() => {
+    setHydratedPoints([]);
     void fetchHistoryDiff(ticker)
       .then(setDiff)
       .catch(() => setDiff(null));
+    setHistoryError(null);
     void fetchHistory(ticker)
-      .then((data) => setHistoryItems(data.items ?? []))
-      .catch(() => setHistoryItems([]));
-  }, [ticker]);
+      .then((data) => {
+        const items = data.items ?? [];
+        setHistoryItems(items);
+        if (items.length > 0) setHistoryOpen(true);
+        if (!points.length) {
+          const latest = items.find((item) => item.thesis_points?.length);
+          if (latest?.thesis_points) {
+            setHydratedPoints(latest.thesis_points);
+          }
+        }
+      })
+      .catch((e) => {
+        setHistoryItems([]);
+        setHistoryError(e instanceof Error ? e.message : "Failed to load analysis history");
+      });
+  }, [ticker, points.length]);
 
-  const showSampleMode = !hasAnalysis && !points.length;
+  const displayPoints = points.length ? points : hydratedPoints;
+  const showSampleMode = !hasAnalysis && !displayPoints.length;
 
   const DiffCard = diff ? (
     <Card className="border-border/60 bg-card/40">
@@ -207,7 +232,25 @@ export function ThesisTrackerPanel({
       </CardHeader>
       {historyOpen && (
         <CardContent className="flex flex-col gap-2 text-xs">
-          {historyItems.length === 0 ? (
+          {historyError ? (
+            <ApiErrorState
+              error={historyError}
+              onRetry={() => {
+                setHistoryError(null);
+                void fetchHistory(ticker)
+                  .then((data) => {
+                    const items = data.items ?? [];
+                    setHistoryItems(items);
+                    if (items.length > 0) setHistoryOpen(true);
+                  })
+                  .catch((e) => {
+                    setHistoryError(
+                      e instanceof Error ? e.message : "Failed to load analysis history",
+                    );
+                  });
+              }}
+            />
+          ) : historyItems.length === 0 ? (
             <div className="flex flex-col gap-2">
               <p className="text-muted-foreground">No prior analyses recorded.</p>
               {onRunAnalysis && (
@@ -302,19 +345,35 @@ export function ThesisTrackerPanel({
     );
   }
 
-  if (!points.length && hasAnalysis) {
+  if (!displayPoints.length && hasAnalysis) {
     return (
       <div className="flex flex-col gap-3">
         {DiffCard}
         {HistorySection}
         <ThesisHealthTimeline ticker={ticker} />
-        <EmptyState
-          icon={BarChart3}
-          title="No thesis points yet"
-          description="Analysis completed but no trackable thesis points were returned. Re-run analysis or upload a research document."
-          actionLabel={isAnalyzing ? "Analyzing…" : "Re-run analysis"}
-          onAction={onRunAnalysis}
-        />
+        {displayPoints.length > 0 ? (
+          displayPoints.map((tp) => (
+            <Card key={tp.id} className="border-border/60 bg-card/40 opacity-90">
+              <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
+                <CardTitle className="text-sm leading-snug">{tp.text}</CardTitle>
+                <Badge variant="outline" className="shrink-0 text-[9px]">
+                  From history
+                </Badge>
+              </CardHeader>
+              <CardContent className="text-xs text-muted-foreground">
+                <span className="font-mono">{tp.metric}</span>
+              </CardContent>
+            </Card>
+          ))
+        ) : (
+          <EmptyState
+            icon={BarChart3}
+            title="No thesis points yet"
+            description="Analysis completed but no trackable thesis points were returned. Re-run analysis or upload a research document."
+            actionLabel={isAnalyzing ? "Analyzing…" : "Re-run analysis"}
+            onAction={onRunAnalysis}
+          />
+        )}
       </div>
     );
   }
@@ -324,7 +383,7 @@ export function ThesisTrackerPanel({
       {DiffCard}
       {HistorySection}
       <ThesisHealthTimeline ticker={ticker} />
-      {localPoints.map((tp) => (
+      {(points.length ? localPoints : displayPoints).map((tp) => (
         <Card key={tp.id} className="border-border/60 bg-card/40">
           <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
             {editingId === tp.id ? (

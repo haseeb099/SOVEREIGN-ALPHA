@@ -10,17 +10,25 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from middleware.auth import require_auth
+from middleware.auth import extract_user_id, require_auth
 from models import AlertRule, ThesisHealthSnapshot
+from services.db_guard import require_db
 from services.market_service import get_market_data
+from services.plan_service import require_pro_plan
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# In-memory watcher notifications (also persisted via rules)
+_watcher_notifications: list[dict] = []
+
 
 class AlertRuleCreate(BaseModel):
     ticker: str
-    condition: str = Field(..., pattern="^(thesis_score_drop|status_change|price_move|earnings_7d)$")
+    condition: str = Field(
+        ...,
+        pattern="^(thesis_score_drop|status_change|price_move|earnings_7d|new_filing|insider_activity|unusual_options)$",
+    )
     channel: str = "in_app"
     threshold: float | None = None
     destination: str | None = None
@@ -32,6 +40,8 @@ def _require_user(request: Request) -> str:
 
 @router.get("/alerts/rules")
 async def list_rules(request: Request):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     async with AsyncSessionLocal() as session:
         rows = (
@@ -55,6 +65,8 @@ async def list_rules(request: Request):
 
 @router.post("/alerts/rules")
 async def create_rule(request: Request, body: AlertRuleCreate):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     async with AsyncSessionLocal() as session:
         config = {}
@@ -76,6 +88,8 @@ async def create_rule(request: Request, body: AlertRuleCreate):
 
 @router.delete("/alerts/rules/{rule_id}")
 async def delete_rule(request: Request, rule_id: str):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     import uuid
 
@@ -91,6 +105,8 @@ async def delete_rule(request: Request, rule_id: str):
 @router.get("/alerts/notifications")
 async def notifications(request: Request):
     """In-app notifications from recent alert evaluations."""
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     alerts = await evaluate_rules_for_user(user_id)
     return {"notifications": alerts}
@@ -195,7 +211,48 @@ async def _evaluate_rule(session, rule: AlertRule, latest_analysis: dict | None)
         if latest_analysis and latest_analysis.get("earnings_overlay"):
             return _notification(rule, f"{rule.ticker} earnings within 7 days — review thesis")
 
+    if rule.condition == "new_filing":
+        for n in _watcher_notifications:
+            if n.get("ticker") == rule.ticker and n.get("condition") == "new_filing":
+                return _notification(rule, n.get("message", f"New filing for {rule.ticker}"))
+
+    if rule.condition == "insider_activity":
+        research = (latest_analysis or {}).get("research_results") or {}
+        insider = research.get("insider") or research.get("insider_sentiment") or {}
+        activity = insider.get("net_activity") or insider.get("net_sentiment")
+        if activity in ("buying", "selling", "bullish", "bearish"):
+            return _notification(
+                rule,
+                f"{rule.ticker} insider {activity} detected",
+            )
+
+    if rule.condition == "unusual_options":
+        research = (latest_analysis or {}).get("research_results") or {}
+        options = research.get("options_flow") or {}
+        strength = float(options.get("signal_strength") or 0)
+        threshold = rule.threshold or 6.0
+        if strength >= threshold:
+            return _notification(
+                rule,
+                f"{rule.ticker} unusual options activity (strength {strength:.1f})",
+            )
+
     return None
+
+
+async def fire_watcher_alert(ticker: str, condition: str, message: str) -> None:
+    """Record watcher-fired alert for rule evaluation."""
+    _watcher_notifications.append(
+        {
+            "ticker": ticker.upper(),
+            "condition": condition,
+            "message": message,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    if len(_watcher_notifications) > 200:
+        _watcher_notifications[:] = _watcher_notifications[-100:]
+    await evaluate_rules_for_ticker(ticker.upper(), latest_analysis={"research_results": {}})
 
 
 def _notification(rule: AlertRule, message: str) -> dict:

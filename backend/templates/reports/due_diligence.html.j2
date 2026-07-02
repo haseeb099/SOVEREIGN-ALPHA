@@ -28,6 +28,44 @@
     </ul>
     <h2>Executive Summary</h2>
     <p>{{ summary }}</p>
+    {% if research_brief %}
+    <h2>Research Dossier</h2>
+    <pre style="white-space:pre-wrap;font-family:inherit">{{ research_brief }}</pre>
+    {% endif %}
+    {% set competitive = research_results.get('competitive_analysis') or {} %}
+    {% if competitive.get('peer_matrix') %}
+    <h2>Peer Comparison</h2>
+    <table>
+      <thead><tr><th>Ticker</th><th>Revenue Growth</th><th>Margins</th><th>Valuation</th><th>Market Share</th></tr></thead>
+      <tbody>
+      {% for peer in competitive.peer_matrix %}
+        <tr>
+          <td>{{ peer.ticker }}</td>
+          <td>{{ peer.revenue_growth }}</td>
+          <td>{{ peer.margins }}</td>
+          <td>{{ peer.valuation }}</td>
+          <td>{{ peer.market_share }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% set esg = research_results.get('esg_compliance') or {} %}
+    {% if esg %}
+    <h2>ESG / Compliance</h2>
+    <p>Governance score: {{ esg.governance_score or 'N/A' }} · Sanctions hit: {{ esg.sanctions_hit }}</p>
+    {% if esg.regulatory_flags %}<ul>{% for f in esg.regulatory_flags %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+    {% endif %}
+    {% set insider = research_results.get('insider_sentiment') or {} %}
+    {% if insider %}
+    <h2>Insider Activity</h2>
+    <p>Sentiment: {{ insider.sentiment_score or 'N/A' }} · Net activity: {{ insider.net_activity or 'neutral' }}</p>
+  {% endif %}
+    {% set options = research_results.get('options_flow') or {} %}
+    {% if options %}
+    <h2>Options Signals</h2>
+    <p>Direction: {{ options.direction or 'neutral' }} · Strength: {{ options.signal_strength or 'N/A' }}</p>
+    {% endif %}
     <h2>Thesis Assumptions</h2>
     <table>
       <thead><tr><th>Metric</th><th>Assumption</th><th>Status</th></tr></thead>

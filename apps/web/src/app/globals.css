@@ -231,7 +231,7 @@ textarea:focus-visible,
 
   @keyframes macro-ticker-scroll {
     0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
+    100% { transform: translateX(calc(-100% / 3)); }
   }
 
   .macro-ticker-track {
@@ -287,6 +287,22 @@ textarea:focus-visible,
       color: oklch(0.52 0.015 260);
     }
   }
+}
+
+@keyframes status-connect {
+  0%,
+  100% {
+    background-color: oklch(0.78 0.14 75);
+    box-shadow: 0 0 0 0 oklch(0.78 0.14 75 / 40%);
+  }
+  50% {
+    background-color: oklch(0.62 0.14 250);
+    box-shadow: 0 0 6px 1px oklch(0.62 0.14 250 / 35%);
+  }
+}
+
+.animate-status-connect {
+  animation: status-connect 1.1s ease-in-out infinite;
 }
 
 @keyframes shimmer {

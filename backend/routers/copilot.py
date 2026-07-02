@@ -3,13 +3,14 @@
 Answers user questions about their portfolio using Gemma 4 with streaming.
 """
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from cerebras.cloud.sdk import AsyncCerebras
 
 from cerebras_config import CEREBRAS_API_KEY, CEREBRAS_MODEL
+from services.plan_service import require_pro_plan
 from services.retrieval_service import format_retrieved_sources, retrieve
 
 router = APIRouter()
@@ -35,7 +36,8 @@ class CopilotRequest(BaseModel):
 
 
 @router.post("/copilot")
-async def portfolio_copilot(request: CopilotRequest):
+async def portfolio_copilot(http_request: Request, request: CopilotRequest):
+    await require_pro_plan(http_request)
     """
     Stream a portfolio analysis response from Gemma 4.
     Returns Server-Sent Events (SSE) for streaming UI.

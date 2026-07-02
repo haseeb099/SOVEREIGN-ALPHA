@@ -24,9 +24,10 @@ def _to_async_url(url: str) -> str:
 
 
 def _engine_connect_args(url: str) -> dict:
+    args: dict = {"timeout": 5}
     if "sslmode=require" in url or "render.com" in url:
-        return {"ssl": True}
-    return {}
+        args["ssl"] = True
+    return args
 
 
 engine = create_async_engine(
@@ -45,14 +46,34 @@ async def init_db() -> None:
     """Run Alembic migrations or fall back to create_all for dev/test."""
     import models  # noqa: F401
 
+    if os.environ.get("SKIP_DB_INIT", "").lower() in ("1", "true", "yes"):
+        logger.warning("SKIP_DB_INIT set — database migrations skipped")
+        return
+
     environment = os.environ.get("ENVIRONMENT", "development")
     try:
         from alembic import command
         from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import text
 
         alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head = script.get_current_head()
+
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+            current = result.scalar_one_or_none()
+
+        if current == head:
+            logger.info("Alembic already at head (%s) — skipping upgrade", head)
+            return
+
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, command.upgrade, alembic_cfg, "head")
+        await asyncio.wait_for(
+            loop.run_in_executor(None, command.upgrade, alembic_cfg, "head"),
+            timeout=30,
+        )
         logger.info("Alembic migrations applied")
     except Exception as e:
         if environment == "production":
@@ -60,11 +81,16 @@ async def init_db() -> None:
             raise
         logger.error(
             "Alembic upgrade failed (%s) — falling back to create_all. "
-            "Run: docker compose build backend && docker compose up -d && alembic upgrade head",
+            "Run: docker compose up -d postgres && alembic upgrade head",
             e,
         )
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except Exception as create_err:
+            if environment == "production":
+                raise
+            logger.warning("create_all skipped (database unavailable): %s", create_err)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -3,16 +3,22 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, RefreshCw, Settings2, Trash2 } from "lucide-react";
-import type { AlertNotification, AlertRule } from "@sovereign/shared";
+import type { AlertNotification, AlertRule, FilingWatchSubscription, WatcherStatus } from "@sovereign/shared";
 import {
   deleteAlertRule,
   fetchAlertNotifications,
   fetchAlertRules,
   fetchFlatfilesStatus,
+  fetchWatcherStatus,
+  pollWatchersNow,
   saveAlertRule,
+  subscribeFilingWatcher,
+  unsubscribeFilingWatcher,
 } from "@/lib/api";
 import { authRequiredMessage, classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { AuthGate, useAuthState } from "@/components/auth/auth-gate";
+import { PlanGate } from "@/components/auth/plan-gate";
+import { useBillingStatus } from "@/hooks/use-billing-status";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { ApiErrorState } from "@/components/ui/api-error-state";
@@ -51,6 +57,9 @@ const CONDITION_LABELS: Record<AlertRule["condition"], string> = {
   status_change: "Status change",
   price_move: "Price move",
   earnings_7d: "Earnings within 7d",
+  new_filing: "New SEC filing",
+  insider_activity: "Insider activity",
+  unusual_options: "Unusual options flow",
 };
 
 const CHANNEL_LABELS: Record<AlertRule["channel"], string> = {
@@ -61,6 +70,7 @@ const CHANNEL_LABELS: Record<AlertRule["channel"], string> = {
 
 export default function SettingsPage() {
   const { persistMessage } = useAuthState();
+  const { isPro } = useBillingStatus();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [form, setForm] = useState<AlertRule>(emptyRule);
   const [loading, setLoading] = useState(true);
@@ -79,6 +89,10 @@ export default function SettingsPage() {
   const [flatfilesTestResult, setFlatfilesTestResult] = useState<string | null>(null);
   const [rulesTestResult, setRulesTestResult] = useState<string | null>(null);
   const [s3DetailsOpen, setS3DetailsOpen] = useState(false);
+  const [watcherStatus, setWatcherStatus] = useState<WatcherStatus | null>(null);
+  const [watcherTicker, setWatcherTicker] = useState("");
+  const [watcherLoading, setWatcherLoading] = useState(false);
+  const [watcherSaving, setWatcherSaving] = useState(false);
 
   const loadRules = async (options?: { suppressErrorToast?: boolean }): Promise<void> => {
     setLoading(true);
@@ -125,9 +139,21 @@ export default function SettingsPage() {
     }
   };
 
+  const refreshWatcherStatus = async () => {
+    setWatcherLoading(true);
+    try {
+      setWatcherStatus(await fetchWatcherStatus());
+    } catch {
+      setWatcherStatus(null);
+    } finally {
+      setWatcherLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadRules().catch(() => {});
     void refreshFlatfilesStatus();
+    void refreshWatcherStatus();
   }, []);
 
   const onSave = async () => {
@@ -189,6 +215,7 @@ export default function SettingsPage() {
       refreshing={loading}
     >
       <div className="flex flex-col gap-6">
+        <PlanGate feature="alerts">
         <AuthGate show={authError}>
         {loadError != null && !loading && (
           <ApiErrorState error={loadError} onRetry={() => void loadRules()} />
@@ -256,10 +283,11 @@ export default function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="thesis_score_drop">Thesis score drop</SelectItem>
-                    <SelectItem value="status_change">Status change</SelectItem>
-                    <SelectItem value="price_move">Price move</SelectItem>
-                    <SelectItem value="earnings_7d">Earnings within 7d</SelectItem>
+                    {(Object.keys(CONDITION_LABELS) as AlertRule["condition"][]).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {CONDITION_LABELS[key]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -350,12 +378,145 @@ export default function SettingsPage() {
                 >
                   Privacy
                 </Link>
+                <Link
+                  href="/settings/workspaces"
+                  className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium hover:bg-muted/50"
+                >
+                  Workspaces
+                </Link>
               </div>
             </CardContent>
           </Card>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="border-border/60 bg-card/40">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-sm">SEC Filing Watcher</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={watcherLoading}
+                onClick={() => void refreshWatcherStatus()}
+              >
+                <RefreshCw className={watcherLoading ? "animate-spin" : ""} />
+                Refresh
+              </Button>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 text-xs">
+              {!isPro ? (
+                <p className="text-muted-foreground">SEC filing watcher — coming soon on Pro.</p>
+              ) : watcherStatus == null ? (
+                <p className="text-muted-foreground">SEC filing watcher — Coming soon.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className={watcherStatus.enabled ? "text-status-live" : ""}>
+                      {watcherStatus.enabled ? "Polling active" : "Polling disabled"}
+                    </Badge>
+                    {watcherStatus.last_poll_at && (
+                      <span className="text-muted-foreground">
+                        Last poll {watcherStatus.last_poll_at}
+                      </span>
+                    )}
+                  </div>
+                  {watcherStatus.tickers_monitored && watcherStatus.tickers_monitored.length > 0 && (
+                    <p className="text-muted-foreground">
+                      Monitoring {watcherStatus.tickers_monitored.length} ticker(s):{" "}
+                      <span className="font-mono">
+                        {watcherStatus.tickers_monitored.slice(0, 8).join(", ")}
+                        {watcherStatus.tickers_monitored.length > 8 ? "…" : ""}
+                      </span>
+                    </p>
+                  )}
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={watcherTicker}
+                      onChange={(e) => setWatcherTicker(e.target.value.toUpperCase())}
+                      placeholder="Ticker to watch"
+                      className="min-h-9 font-mono"
+                      aria-label="Filing watcher ticker"
+                    />
+                    <Button
+                      size="sm"
+                      className="min-h-9"
+                      disabled={watcherSaving || !watcherTicker.trim()}
+                      onClick={async () => {
+                        setWatcherSaving(true);
+                        try {
+                          await subscribeFilingWatcher(watcherTicker.trim());
+                          toast.success(`Watching filings for ${watcherTicker.trim()}`);
+                          setWatcherTicker("");
+                          await refreshWatcherStatus();
+                        } catch (e) {
+                          toastApiError(classifyFetchError(e));
+                        } finally {
+                          setWatcherSaving(false);
+                        }
+                      }}
+                    >
+                      {watcherSaving ? "Subscribing…" : "Subscribe"}
+                    </Button>
+                  </div>
+                  {(watcherStatus.subscriptions?.length ?? 0) > 0 && (
+                    <ul className="space-y-1.5">
+                      {watcherStatus.subscriptions!.map((sub: FilingWatchSubscription) => (
+                        <li
+                          key={sub.id}
+                          className="flex items-center justify-between rounded border border-border/50 px-2 py-1.5"
+                        >
+                          <div>
+                            <span className="font-mono font-semibold">{sub.ticker}</span>
+                            <span className="ml-2 text-muted-foreground">
+                              {sub.forms.join(", ")}
+                            </span>
+                            {!sub.enabled && (
+                              <Badge variant="outline" className="ml-2 text-[9px]">
+                                Paused
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Remove watcher for ${sub.ticker}`}
+                            onClick={async () => {
+                              try {
+                                await unsubscribeFilingWatcher(sub.id);
+                                toast.success(`Removed watcher for ${sub.ticker}`);
+                                await refreshWatcherStatus();
+                              } catch (e) {
+                                toastApiError(classifyFetchError(e));
+                              }
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    onClick={async () => {
+                      try {
+                        await pollWatchersNow();
+                        toast.success("Manual poll triggered");
+                        await refreshWatcherStatus();
+                      } catch (e) {
+                        toastApiError(classifyFetchError(e));
+                      }
+                    }}
+                  >
+                    Poll now
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="border-border/60 bg-card/40">
             <CardHeader>
               <CardTitle className="text-sm">Bulk Market Data (S3)</CardTitle>
@@ -515,6 +676,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
         </AuthGate>
+        </PlanGate>
 
         <Dialog open={cacheDialogOpen} onOpenChange={setCacheDialogOpen}>
           <DialogContent>

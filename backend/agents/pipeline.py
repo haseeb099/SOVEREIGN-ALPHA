@@ -33,10 +33,11 @@ async def run_analysis_pipeline(
     on_log: Optional[Callable] = None,
     retrieved_chunks: Optional[list] = None,
     retrieved_sources: Optional[str] = None,
+    enable_research: bool = True,
 ) -> dict:
     """
     Run the full 5-agent pipeline and return a structured analysis payload.
-    Delegates to the compiled LangGraph analysis subgraph.
+    Delegates to the compiled LangGraph analysis subgraph (with optional research pre-pass).
     """
     if not CEREBRAS_API_KEY:
         raise RuntimeError("CEREBRAS_API_KEY not set in environment")
@@ -49,4 +50,5 @@ async def run_analysis_pipeline(
         on_log=on_log,
         retrieved_chunks=retrieved_chunks,
         retrieved_sources=retrieved_sources,
+        enable_research=enable_research,
     )

@@ -71,6 +71,8 @@ def _build_context(payload: dict, branding: dict | None = None) -> dict:
         ),
         "portfolio": payload.get("portfolio") or {},
         "citations": payload.get("agent_traces") or [],
+        "research_brief": payload.get("research_brief") or "",
+        "research_results": payload.get("research_results") or {},
         "fmt_price": _fmt_price,
     }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,10 +25,12 @@ async def create_workflow_run(
     user_id: str | None,
     scenario: dict,
     auto_approve: bool,
+    org_id=None,
 ) -> WorkflowRun:
     row = WorkflowRun(
         id=uuid.uuid4(),
         user_id=user_id,
+        org_id=org_id,
         goal=goal,
         ticker="",
         status="running",
@@ -158,11 +161,35 @@ def _checkpoint_from_next(next_nodes: tuple) -> dict | None:
     return detect_interrupt(list(next_nodes))
 
 
+async def get_workflow_status(workflow_id: str) -> dict[str, Any] | None:
+    row = await get_workflow_run(workflow_id)
+    if not row:
+        return None
+    return workflow_to_response(row)
+
+
+async def verify_workflow_access(
+    workflow_id: str,
+    user_id: str | None = None,
+    org_id: uuid.UUID | None = None,
+) -> bool:
+    """Return True if caller owns the workflow (user_id + org_id match)."""
+    row = await get_workflow_run(workflow_id)
+    if not row:
+        return False
+    if user_id and row.user_id and row.user_id != user_id:
+        return False
+    if org_id and row.org_id and row.org_id != org_id:
+        return False
+    return True
+
+
 async def start_due_diligence_workflow(
     goal: str,
     scenario: dict,
     *,
     user_id: str | None = None,
+    org_id=None,
     auto_approve: bool = False,
 ) -> dict[str, Any]:
     from agents.orchestrator.graph import get_workflow_graph
@@ -172,6 +199,7 @@ async def start_due_diligence_workflow(
         user_id=user_id,
         scenario=scenario,
         auto_approve=auto_approve,
+        org_id=org_id,
     )
     workflow_id = str(row.id)
     graph = get_workflow_graph(auto_approve=auto_approve)
@@ -204,13 +232,6 @@ async def start_due_diligence_workflow(
         resp = workflow_to_response(row) if row else {"workflow_id": workflow_id, "status": "failed"}
         resp["error"] = str(exc)
         return resp
-
-
-async def get_workflow_status(workflow_id: str) -> dict[str, Any] | None:
-    row = await get_workflow_run(workflow_id)
-    if not row:
-        return None
-    return workflow_to_response(row)
 
 
 async def resume_workflow(workflow_id: str, *, approved: bool) -> dict[str, Any] | None:

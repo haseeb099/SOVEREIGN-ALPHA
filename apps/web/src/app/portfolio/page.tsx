@@ -19,6 +19,8 @@ import {
   updatePortfolioHolding,
 } from "@/lib/api";
 import { AuthGate, useAuthState } from "@/components/auth/auth-gate";
+import { PlanGate } from "@/components/auth/plan-gate";
+import { useBillingStatus } from "@/hooks/use-billing-status";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { formatUsd } from "@/lib/format";
@@ -34,12 +36,36 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { PortfolioRiskPanel } from "@/components/portfolio/portfolio-risk-panel";
 import { toast } from "sonner";
 
 type FormErrors = Partial<Record<"ticker" | "shares" | "cost_basis", string>>;
+
+const LOCAL_HOLDINGS_KEY = "sovereign-portfolio-holdings";
+const FREE_TIER_HOLDING_LIMIT = 3;
+
+function loadLocalHoldings(): Holding[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_HOLDINGS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as Holding[];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalHoldings(holdings: Holding[]) {
+  try {
+    localStorage.setItem(
+      LOCAL_HOLDINGS_KEY,
+      JSON.stringify(holdings.slice(0, FREE_TIER_HOLDING_LIMIT)),
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
 
 function SectorBar({ label, weight }: { label: string; weight: number }) {
   const pct = Math.min(100, Math.max(0, weight * 100));
@@ -61,6 +87,7 @@ function SectorBar({ label, weight }: { label: string; weight: number }) {
 
 export default function PortfolioPage() {
   const { persistMessage } = useAuthState();
+  const { isPro } = useBillingStatus();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [form, setForm] = useState({ ticker: "", shares: "", cost_basis: "" });
@@ -78,6 +105,7 @@ export default function PortfolioPage() {
   const [csvDragging, setCsvDragging] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const [editFormErrors, setEditFormErrors] = useState<FormErrors>({});
+  const [usingLocalHoldings, setUsingLocalHoldings] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const portfolioCacheKey = "sovereign-portfolio-summary";
@@ -100,6 +128,10 @@ export default function PortfolioPage() {
         fetchPortfolioSummary(),
       ]);
       setHoldings(holdingsData);
+      setUsingLocalHoldings(false);
+      if (holdingsData.length > 0) {
+        saveLocalHoldings(holdingsData);
+      }
       if (summaryData) {
         setSummary(summaryData);
         try {
@@ -122,14 +154,22 @@ export default function PortfolioPage() {
       }
     } catch (e) {
       const err = classifyFetchError(e);
-      if (err.kind === "auth") {
-        setAuthError(true);
-        setHoldings([]);
-        setSummary(null);
+      if (err.kind === "auth" || !isPro) {
+        const local = loadLocalHoldings();
+        if (local.length > 0) {
+          setHoldings(local);
+          setUsingLocalHoldings(true);
+          setSummary(null);
+          setAuthError(err.kind === "auth");
+        } else if (err.kind === "auth") {
+          setAuthError(true);
+          setHoldings([]);
+          setSummary(null);
+        }
       } else if (!options?.suppressErrorToast) {
         toastApiError(err);
       }
-      throw err;
+      if (err.kind !== "auth" && isPro) throw err;
     } finally {
       setLoading(false);
       setSummaryLoading(false);
@@ -179,10 +219,27 @@ export default function PortfolioPage() {
     }
     setSaving(true);
     try {
-      await savePortfolioHolding(parsed.data);
+      if (isPro) {
+        await savePortfolioHolding(parsed.data);
+      } else {
+        const local = loadLocalHoldings();
+        const exists = local.some((h) => h.ticker === parsed.data.ticker);
+        if (!exists && local.length >= FREE_TIER_HOLDING_LIMIT) {
+          toast.error(`Free tier limited to ${FREE_TIER_HOLDING_LIMIT} holdings — upgrade for more`);
+          return;
+        }
+        const next = [
+          ...local.filter((h) => h.ticker !== parsed.data.ticker),
+          { ...parsed.data, id: `local-${parsed.data.ticker}` },
+        ];
+        saveLocalHoldings(next);
+        setHoldings(next);
+        setUsingLocalHoldings(true);
+      }
       toast.success("Holding saved");
       setForm({ ticker: "", shares: "", cost_basis: "" });
-      await refresh({ silent: true });
+      setAddOpen(false);
+      if (isPro) await refresh({ silent: true });
     } catch (e) {
       const err = classifyFetchError(e);
       toastApiError(err, {
@@ -195,9 +252,15 @@ export default function PortfolioPage() {
 
   const onDelete = async (id: string) => {
     try {
-      await deletePortfolioHolding(id);
+      if (isPro && !id.startsWith("local-")) {
+        await deletePortfolioHolding(id);
+      } else {
+        const next = loadLocalHoldings().filter((h) => h.id !== id && `local-${h.ticker}` !== id);
+        saveLocalHoldings(next);
+        setHoldings(next);
+      }
       toast.success("Holding deleted");
-      await refresh({ silent: true });
+      if (isPro) await refresh({ silent: true });
     } catch (e) {
       toastApiError(e, { message: "Delete failed" });
     }
@@ -221,13 +284,27 @@ export default function PortfolioPage() {
     }
     setEditFormErrors({});
     try {
-      await updatePortfolioHolding(editHolding.id, {
-        shares: Number(editForm.shares),
-        cost_basis: editForm.cost_basis ? Number(editForm.cost_basis) : undefined,
-      });
+      if (isPro && editHolding.id && !editHolding.id.startsWith("local-")) {
+        await updatePortfolioHolding(editHolding.id, {
+          shares: Number(editForm.shares),
+          cost_basis: editForm.cost_basis ? Number(editForm.cost_basis) : undefined,
+        });
+        await refresh({ silent: true });
+      } else {
+        const next = loadLocalHoldings().map((h) =>
+          h.ticker === editHolding.ticker
+            ? {
+                ...h,
+                shares: Number(editForm.shares),
+                cost_basis: editForm.cost_basis ? Number(editForm.cost_basis) : undefined,
+              }
+            : h,
+        );
+        saveLocalHoldings(next);
+        setHoldings(next);
+      }
       toast.success("Holding updated");
       setEditHolding(null);
-      await refresh({ silent: true });
     } catch (e) {
       const err = classifyFetchError(e);
       toastApiError(err, {
@@ -422,24 +499,21 @@ export default function PortfolioPage() {
               Compare all
             </Button>
           )}
-          {displayHoldings.length > 0 && (
-          <Sheet open={addOpen} onOpenChange={setAddOpen}>
-            <SheetTrigger render={<Button size="sm" className="gap-1.5" />}>
-              <Plus className="size-3.5" />
-              Add holding
-            </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:max-w-md">
-              <SheetHeader>
-                <SheetTitle>Add holding</SheetTitle>
-              </SheetHeader>
-              <div className="mt-4">{AddHoldingForm}</div>
-            </SheetContent>
-          </Sheet>
-          )}
+          <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+            <Plus className="size-3.5" />
+            Add holding
+          </Button>
         </>
       }
     >
       <div className="flex flex-col gap-6">
+        {usingLocalHoldings && (
+          <div className="flex items-center gap-2 border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-muted-foreground">
+            <Info className="size-3.5 shrink-0 text-primary" />
+            Local holdings only (max {FREE_TIER_HOLDING_LIMIT}). Upgrade to Pro for cloud sync.
+          </div>
+        )}
+        <PlanGate feature="portfolio">
         <AuthGate show={authError}>
         {/* KPI row */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -530,6 +604,8 @@ export default function PortfolioPage() {
             </Card>
           )}
         </div>
+
+        <PortfolioRiskPanel />
 
         {/* Holdings table */}
         <Card className="overflow-hidden terminal-panel ring-0">
@@ -654,6 +730,16 @@ export default function PortfolioPage() {
           </CardContent>
         </Card>
         </AuthGate>
+        </PlanGate>
+
+        <Sheet open={addOpen} onOpenChange={setAddOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>Add holding</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">{AddHoldingForm}</div>
+          </SheetContent>
+        </Sheet>
 
         <Sheet open={!!editHolding} onOpenChange={(open) => !open && setEditHolding(null)}>
           <SheetContent side="right" className="w-full sm:max-w-md">

@@ -32,12 +32,30 @@ async def run_verification(
         retrieved_chunks=retrieved_chunks or [],
     )
 
+    research_results = (analysis_result.get("research_results") or {})
+    esg = research_results.get("esg") or research_results.get("esg_compliance") or {}
+    raw_esg = (analysis_result.get("raw_agents") or {}).get("esg") or {}
+    sanctions_claim = esg.get("sanctions_hit")
+    if sanctions_claim is not None:
+        for out in tool_outputs or []:
+            if out.get("tool") == "esg":
+                tool_sanctioned = (out.get("summary") or {}).get("sanctions", {}).get("sanctioned")
+                if tool_sanctioned is not None and bool(tool_sanctioned) != bool(sanctions_claim):
+                    consistency.append(
+                        "ESG agent sanctions_hit inconsistent with OpenSanctions tool output"
+                    )
+    if raw_esg.get("sanctions_hit") is not None and esg.get("sanctions_hit") is not None:
+        if bool(raw_esg.get("sanctions_hit")) != bool(esg.get("sanctions_hit")):
+            consistency.append("ESG sanctions flag mismatch between raw_agents and research_results")
+
     client = require_cerebras_client()
     loop = asyncio.get_event_loop()
     context = json.dumps(
         {
             "memo": analysis_result.get("memo"),
             "raw_agents": analysis_result.get("raw_agents"),
+            "research_brief": analysis_result.get("research_brief"),
+            "research_results": analysis_result.get("research_results"),
             "thesis_points": analysis_result.get("thesis_points"),
             "tool_outputs": tool_outputs or [],
             "existing_warnings": consistency,

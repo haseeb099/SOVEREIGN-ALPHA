@@ -9,6 +9,8 @@ import type { MacroEvent, MarketSearchResult } from "@sovereign/shared";
 import { AppNav, NavDrawerContent } from "@/components/layout/app-nav";
 import { LocalSessionBanner } from "@/components/layout/local-session-banner";
 import { SystemStatusBar } from "@/components/layout/system-status-bar";
+import { DemoModeBanner } from "@/components/demo/demo-mode-banner";
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { KeyboardShortcutsDialog } from "@/components/terminal/keyboard-shortcuts-dialog";
 import { LeftSidebar } from "@/components/terminal/left-sidebar";
 import { MacroEventConfirmDialog } from "@/components/terminal/macro-event-confirm-dialog";
@@ -154,11 +156,21 @@ export function TerminalShell({
     router.push(`/terminal/${ticker}/charts`);
   }, [router, ticker]);
 
+  const goToDossier = useCallback(() => {
+    router.push(`/terminal/${ticker}/dossier`);
+  }, [router, ticker]);
+
+  const goToLab = useCallback(() => {
+    router.push(`/terminal/${ticker}/lab`);
+  }, [router, ticker]);
+
   useTerminalShortcuts({
     onToggleScenario: toggleScenario,
     onShowShortcuts: () => setShortcutsOpen(true),
     onGoToTracker: goToTracker,
     onGoToCharts: goToCharts,
+    onGoToDossier: goToDossier,
+    onGoToLab: goToLab,
   });
 
   const handleHealthRefresh = () => {
@@ -168,6 +180,8 @@ export function TerminalShell({
 
   return (
     <div className="terminal-root flex h-dvh flex-col overflow-hidden bg-background pb-safe">
+      <DemoModeBanner />
+      <OnboardingWizard />
       <header className="terminal-topbar flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2 sm:gap-3">
         <div className="flex shrink-0 items-center gap-2 font-mono text-xs">
           <Link
@@ -192,8 +206,11 @@ export function TerminalShell({
             onKeyDown={(e) => void onTopSearchKeyDown(e)}
             onFocus={() => topSearch.length > 0 && setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-            placeholder={ticker}
-            className={cn("h-7 pl-7 font-mono text-[11px]", searchError && "border-destructive")}
+            placeholder="Search ticker…"
+            className={cn(
+              "h-7 pl-7 font-mono text-[11px] focus-visible:ring-2 focus-visible:ring-ring",
+              searchError && "border-destructive",
+            )}
             aria-label="Ticker search"
             aria-invalid={!!searchError}
             aria-describedby={searchError ? "ticker-search-error" : undefined}

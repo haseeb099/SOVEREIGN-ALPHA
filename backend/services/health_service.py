@@ -1,6 +1,7 @@
 """Health check subsystem probes."""
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from typing import Any
@@ -21,9 +22,14 @@ async def check_database() -> dict[str, Any]:
         from database import engine
         from sqlalchemy import text
 
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+        async def _probe() -> None:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+
+        await asyncio.wait_for(_probe(), timeout=3)
         return {"status": "ok"}
+    except asyncio.TimeoutError:
+        return {"status": "error", "detail": "database connection timed out"}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 
@@ -33,10 +39,16 @@ async def check_redis() -> dict[str, Any]:
         import redis.asyncio as redis
 
         url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        r = await redis.from_url(url, decode_responses=True)
-        await r.ping()
-        await r.aclose()
+
+        async def _probe() -> None:
+            r = await redis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+            await r.ping()
+            await r.aclose()
+
+        await asyncio.wait_for(_probe(), timeout=3)
         return {"status": "ok"}
+    except asyncio.TimeoutError:
+        return {"status": "error", "detail": "redis connection timed out"}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 

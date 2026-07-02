@@ -10,6 +10,10 @@ from agents.planning_agent import run_planning
 from agents.verification_agent import run_verification
 from agents.orchestrator.state import WorkflowState
 from agents.tools.edgar_tool import fetch_and_index_edgar
+from agents.tools.insider_tool import fetch_and_index_insider
+from agents.tools.options_tool import fetch_and_index_options
+from agents.tools.esg_tool import fetch_and_index_esg
+from agents.tools.peer_tool import fetch_and_index_peers
 from agents.tools.web_search_tool import search_and_index_web
 from routers.telemetry import broadcast_log
 from services.agent_memory_service import load_thesis_evolution
@@ -73,6 +77,42 @@ async def fetch_tools_node(state: WorkflowState) -> dict:
             except Exception as e:
                 logger.warning("EDGAR fetch failed: %s", e)
                 tool_outputs.append({"tool": "edgar", "error": str(e)})
+        elif tool == "insider":
+            await _workflow_log(state, "TOOLS", f"Fetching Form 4 insider activity for {ticker}")
+            try:
+                insider_chunks = await fetch_and_index_insider(ticker)
+                chunks.extend(insider_chunks)
+                tool_outputs.append({"tool": "insider", "chunks": len(insider_chunks)})
+            except Exception as e:
+                logger.warning("Insider fetch failed: %s", e)
+                tool_outputs.append({"tool": "insider", "error": str(e)})
+        elif tool == "options":
+            await _workflow_log(state, "TOOLS", f"Fetching options flow for {ticker}")
+            try:
+                opt_chunks = await fetch_and_index_options(ticker)
+                chunks.extend(opt_chunks)
+                tool_outputs.append({"tool": "options", "chunks": len(opt_chunks)})
+            except Exception as e:
+                logger.warning("Options fetch failed: %s", e)
+                tool_outputs.append({"tool": "options", "error": str(e)})
+        elif tool == "esg":
+            await _workflow_log(state, "TOOLS", f"Running ESG/compliance screen for {ticker}")
+            try:
+                esg_chunks = await fetch_and_index_esg(ticker)
+                chunks.extend(esg_chunks)
+                tool_outputs.append({"tool": "esg", "chunks": len(esg_chunks)})
+            except Exception as e:
+                logger.warning("ESG fetch failed: %s", e)
+                tool_outputs.append({"tool": "esg", "error": str(e)})
+        elif tool == "peers":
+            await _workflow_log(state, "TOOLS", f"Resolving peer set for {ticker}")
+            try:
+                peer_chunks = await fetch_and_index_peers(ticker)
+                chunks.extend(peer_chunks)
+                tool_outputs.append({"tool": "peers", "chunks": len(peer_chunks)})
+            except Exception as e:
+                logger.warning("Peer resolve failed: %s", e)
+                tool_outputs.append({"tool": "peers", "error": str(e)})
         elif tool == "web_search":
             query = params.get("query") or f"{ticker} investment risks outlook"
             await _workflow_log(state, "TOOLS", f"Web search: {query[:60]}")
@@ -83,11 +123,16 @@ async def fetch_tools_node(state: WorkflowState) -> dict:
             except Exception as e:
                 logger.warning("Web search failed: %s", e)
                 tool_outputs.append({"tool": "web_search", "error": str(e)})
+        elif tool == "research_agents":
+            tool_outputs.append({"tool": "research_agents", "note": "runs in analysis graph"})
 
-    if not any(s.get("tool") in ("edgar", "web_search") for s in steps):
+    if not any(s.get("tool") in ("edgar", "web_search", "insider", "options", "esg", "peers") for s in steps):
         try:
-            edgar_chunks = await fetch_and_index_edgar(ticker)
-            chunks.extend(edgar_chunks)
+            for form in ("10-K", "10-Q", "8-K"):
+                edgar_chunks = await fetch_and_index_edgar(ticker, form=form)
+                chunks.extend(edgar_chunks)
+            insider_chunks = await fetch_and_index_insider(ticker)
+            chunks.extend(insider_chunks)
             web_chunks = await search_and_index_web(ticker, f"{ticker} due diligence risks 2026")
             chunks.extend(web_chunks)
         except Exception as e:
@@ -144,6 +189,7 @@ async def run_analysis_node(state: WorkflowState) -> dict:
         retrieved_sources=state.get("retrieved_sources"),
         prior_analyses=state.get("prior_analyses") or "",
         on_log=None,
+        enable_research=True,
     )
     safe_result = json.loads(json.dumps(result, default=str))
     return {"analysis_result": safe_result, "market_data": market_data, "pending_checkpoint": None}

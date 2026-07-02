@@ -46,6 +46,8 @@ def _init_analysis_state_fields(state: AnalysisState) -> AnalysisState:
             state.get("retrieved_sources") or "RETRIEVED_SOURCES: (none)",
             state.get("thesis_points"),
             state.get("prior_analyses"),
+            research_brief=state.get("research_brief"),
+            red_team_signals=state.get("red_team_signals"),
         )
     if "results" not in state:
         state["results"] = {}
@@ -56,6 +58,47 @@ def _init_analysis_state_fields(state: AnalysisState) -> AnalysisState:
     if "start_time" not in state:
         state["start_time"] = time.time()
     return state
+
+
+async def _run_research_wrapper(state: AnalysisState) -> dict:
+    """Run Phase 20 research subgraph when enable_research is True."""
+    if not state.get("enable_research", True):
+        return {}
+    from agents.orchestrator.research_graph import run_research_pass
+
+    result = await run_research_pass(
+        ticker=state.get("ticker", ""),
+        market_data=state.get("market_data") or {},
+        scenario=state.get("scenario") or {},
+        retrieved_chunks=state.get("retrieved_chunks") or [],
+        retrieved_sources=state.get("retrieved_sources"),
+        on_log=state.get("on_log"),
+    )
+    chunks = result.get("retrieved_chunks") or state.get("retrieved_chunks") or []
+    from agents.base import build_analysis_context
+
+    context = build_analysis_context(
+        state.get("ticker", ""),
+        state.get("market_data") or {},
+        state.get("scenario") or {},
+        result.get("retrieved_sources") or state.get("retrieved_sources") or "",
+        state.get("thesis_points"),
+        state.get("prior_analyses"),
+        research_brief=result.get("research_brief"),
+        red_team_signals=result.get("red_team_signals"),
+    )
+    return {
+        "retrieved_chunks": chunks,
+        "retrieved_sources": result.get("retrieved_sources") or state.get("retrieved_sources"),
+        "research_brief": result.get("research_brief", ""),
+        "research_results": result.get("research_results") or {},
+        "research_traces": result.get("research_traces") or [],
+        "red_team_signals": result.get("red_team_signals") or {},
+        "pipeline_audit": list(state.get("pipeline_audit") or [])
+        + list(result.get("pipeline_audit") or []),
+        "context": context,
+        "valid_chunk_ids": {c["chunk_id"] for c in chunks if c.get("chunk_id")},
+    }
 
 
 async def _fundamental_wrapper(state: AnalysisState) -> dict:
@@ -96,6 +139,7 @@ def finalize_analysis_state(state: AnalysisState) -> dict:
     red_team = results.get("red_team", {})
 
     agent_traces = []
+    research_traces = state.get("research_traces") or []
     for key in ("fundamental", "macro", "bull", "red_team", "synthesis"):
         if key in results and "error" not in results[key]:
             agent_traces.append(build_agent_trace(key, results[key], agent_timings.get(key)))
@@ -126,6 +170,11 @@ def finalize_analysis_state(state: AnalysisState) -> dict:
     memo_audit = list(synthesis.get("audit_warnings") or [])
     memo_audit.extend(pipeline_audit)
 
+    raw_agents = dict(results)
+    research_results = state.get("research_results") or {}
+    for k, v in research_results.items():
+        raw_agents[k] = v
+
     return {
         "ticker": ticker,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -150,7 +199,10 @@ def finalize_analysis_state(state: AnalysisState) -> dict:
         "agent_traces": agent_traces,
         "retrieved_chunk_count": len(retrieved_chunks),
         "agent_logs": [],
-        "raw_agents": results,
+        "raw_agents": raw_agents,
+        "research_brief": state.get("research_brief", ""),
+        "research_results": state.get("research_results") or {},
+        "research_traces": research_traces,
     }
 
 
@@ -170,8 +222,10 @@ async def _finalize_analysis_node(state: AnalysisState) -> dict:
     return {"pipeline_result": payload}
 
 
-def build_analysis_graph():
+def build_analysis_graph(*, enable_research: bool = True):
     builder = StateGraph(AnalysisState)
+    if enable_research:
+        builder.add_node("run_research", _run_research_wrapper)
     builder.add_node("fundamental", _fundamental_wrapper)
     builder.add_node("macro", _macro_wrapper)
     builder.add_node("bull", _bull_wrapper)
@@ -179,7 +233,11 @@ def build_analysis_graph():
     builder.add_node("synthesis", _synthesis_wrapper)
     builder.add_node("finalize", _finalize_analysis_node)
 
-    builder.add_edge(START, "fundamental")
+    if enable_research:
+        builder.add_edge(START, "run_research")
+        builder.add_edge("run_research", "fundamental")
+    else:
+        builder.add_edge(START, "fundamental")
     builder.add_edge("fundamental", "macro")
     builder.add_edge("macro", "bull")
     builder.add_edge("bull", "red_team")
@@ -189,11 +247,8 @@ def build_analysis_graph():
     return builder.compile()
 
 
-def get_analysis_graph():
-    global _analysis_graph
-    if _analysis_graph is None:
-        _analysis_graph = build_analysis_graph()
-    return _analysis_graph
+def get_analysis_graph(*, enable_research: bool = True):
+    return build_analysis_graph(enable_research=enable_research)
 
 
 async def run_analysis_graph(
@@ -206,9 +261,10 @@ async def run_analysis_graph(
     retrieved_sources: Optional[str] = None,
     prior_analyses: str = "",
     on_log: Optional[Callable] = None,
+    enable_research: bool = True,
 ) -> dict:
     """Run analysis subgraph; returns pipeline-compatible dict."""
-    graph = get_analysis_graph()
+    graph = get_analysis_graph(enable_research=enable_research)
     initial: AnalysisState = {
         "ticker": ticker.upper(),
         "market_data": market_data,
@@ -219,6 +275,7 @@ async def run_analysis_graph(
         "prior_analyses": prior_analyses,
         "on_log": on_log,
         "start_time": time.time(),
+        "enable_research": enable_research,
     }
     final_state = await graph.ainvoke(initial)
     if final_state.get("pipeline_result"):

@@ -61,9 +61,25 @@ async def test_pipeline_output_has_grounded_traces(
     mock_cerebras_agent,
     sample_market_data,
     sample_scenario,
+    monkeypatch,
 ):
     from agents.pipeline import run_analysis_pipeline
     from services.retrieval_service import index_market_snapshot, retrieve
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "agents.orchestrator.research_graph.run_research_pass",
+        AsyncMock(
+            return_value={
+                "research_brief": "RESEARCH_BRIEF:",
+                "research_results": {},
+                "research_traces": [],
+                "red_team_signals": {},
+                "retrieved_chunks": [],
+                "pipeline_audit": [],
+            }
+        ),
+    )
 
     await index_market_snapshot("TSLA", sample_market_data)
     chunks = await retrieve(
@@ -75,6 +91,7 @@ async def test_pipeline_output_has_grounded_traces(
         market_data=sample_market_data,
         scenario=sample_scenario,
         retrieved_chunks=chunks,
+        enable_research=True,
     )
     traces = result.get("agent_traces") or []
     assert len(traces) == 5

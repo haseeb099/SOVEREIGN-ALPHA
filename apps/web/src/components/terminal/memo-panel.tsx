@@ -100,9 +100,17 @@ export function PriceHistoryChart({ ticker }: { ticker: string }) {
           .filter((p): p is { label: string; date: string; price: number } => p != null);
         const sliceCount =
           range === "1w" ? 7 : range === "1m" ? 22 : range === "3m" ? 66 : range === "6m" ? 126 : 252;
-        setHistory(points.slice(-sliceCount));
+        const sliced = points.slice(-sliceCount);
+        setHistory(sliced);
+        const flatData =
+          sliced.length > 1 && sliced.every((p) => p.price === sliced[0]!.price);
         if (points.length === 0) {
           setError(fetchError ?? "No price history available");
+        } else if (flatData) {
+          setError(
+            fetchError ??
+              "Market data feed not configured — chart ranges may look identical",
+          );
         }
       })
       .catch((e) => {

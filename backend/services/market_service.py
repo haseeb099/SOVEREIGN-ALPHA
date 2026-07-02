@@ -123,7 +123,9 @@ CACHE_TTL = CACHE_TTL_EQUITY  # backward compat for tests
 
 
 async def get_redis():
-    return await redis.from_url(REDIS_URL, decode_responses=True)
+    return await redis.from_url(
+        REDIS_URL, decode_responses=True, socket_connect_timeout=3
+    )
 
 
 def _cache_ttl(asset_key: str, config: dict | None) -> int:
@@ -351,7 +353,7 @@ async def _fetch_yfinance(ticker_str: str, config: dict) -> dict:
             "fetched_at": time.time(),
         }
 
-    return await loop.run_in_executor(None, _sync_fetch)
+    return await asyncio.wait_for(loop.run_in_executor(None, _sync_fetch), timeout=20.0)
 
 
 async def _fetch_alpha_vantage(ticker_str: str, config: dict) -> dict:

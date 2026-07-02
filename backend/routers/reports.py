@@ -17,6 +17,7 @@ import bcrypt
 from database import AsyncSessionLocal
 from middleware.auth import resolve_user_id
 from models import Report
+from services.plan_service import require_pro_plan
 from services.report_diff_service import diff_reports
 from services.report_polish_service import polish_report_narrative
 from services.report_template_service import render_report_html, VALID_TEMPLATES
@@ -100,6 +101,7 @@ async def _get_report_row(token: str) -> Report:
 
 @router.post("/reports/generate")
 async def generate_report(request: Request, body: ReportGenerateRequest):
+    await require_pro_plan(request)
     user_id = resolve_user_id(request)
     template = body.template if body.template in VALID_TEMPLATES else "equity_research"
 

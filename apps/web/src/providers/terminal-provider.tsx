@@ -16,11 +16,13 @@ import {
   computeScenarioPreview,
   type AnalyzeResponse,
   type IngestExtraction,
+  type MemoDistribution,
   type Scenario,
   type ScenarioPreviewResponse,
   type Ticker,
+  type ValuationLabSnapshot,
 } from "@sovereign/shared";
-import { previewScenario, runAnalysis } from "@/lib/api";
+import { generateValuationLab, previewScenario, runAnalysis } from "@/lib/api";
 import { classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { toast } from "sonner";
 
@@ -41,19 +43,49 @@ type TerminalContextValue = {
   canRedo: boolean;
   corpusId: string | null;
   setCorpusId: (id: string | null) => void;
-  analyze: (thesisPoints?: AnalyzeResponse["thesis_points"]) => Promise<void>;
+  analyze: (
+    thesisPoints?: AnalyzeResponse["thesis_points"],
+    options?: { enable_research?: boolean },
+  ) => Promise<void>;
   applyWorkflowAnalysis: (analysis: AnalyzeResponse) => void;
   onIngestResult: (extraction: IngestExtraction) => void;
   onCorpusResult: (merged: IngestExtraction) => void;
   applyScenarioField: <K extends keyof Scenario>(key: K, value: Scenario[K]) => void;
   undoScenario: () => void;
   redoScenario: () => void;
+  valuationLab: ValuationLabSnapshot | null;
+  setValuationLab: (snap: ValuationLabSnapshot | null) => void;
+  runValuationLab: (useLlm?: boolean) => Promise<void>;
+  applyLabDistribution: (distribution: MemoDistribution) => void;
+  isLabLoading: boolean;
 };
 
 const TerminalContext = createContext<TerminalContextValue | null>(null);
 
 function scenarioStorageKey(ticker: string) {
   return `sovereign-scenario-${ticker}`;
+}
+
+function valuationLabStorageKey(ticker: string) {
+  return `sovereign-valuation-lab-${ticker}`;
+}
+
+function loadStoredValuationLab(ticker: string): ValuationLabSnapshot | null {
+  try {
+    const raw = localStorage.getItem(valuationLabStorageKey(ticker));
+    if (!raw) return null;
+    return JSON.parse(raw) as ValuationLabSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function persistValuationLab(ticker: string, snap: ValuationLabSnapshot) {
+  try {
+    localStorage.setItem(valuationLabStorageKey(ticker), JSON.stringify(snap));
+  } catch {
+    /* ignore quota */
+  }
 }
 
 function loadStoredScenario(ticker: string): Scenario | null {
@@ -94,17 +126,26 @@ export function TerminalProvider({
   const [error, setError] = useState<unknown | null>(null);
   const [isCached, setIsCached] = useState(false);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const analyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAnalyzingRef = useRef(false);
+  const lastToastedErrorRef = useRef<string | null>(null);
   const analysisRef = useRef<AnalyzeResponse | null>(null);
   const scenarioRef = useRef<Scenario>(DEFAULT_SCENARIO);
   const historyIndexRef = useRef(0);
   const skipHistoryRef = useRef(false);
   const corpusIdRef = useRef<string | null>(null);
   const [corpusId, setCorpusIdState] = useState<string | null>(null);
+  const [valuationLab, setValuationLabState] = useState<ValuationLabSnapshot | null>(null);
+  const [isLabLoading, setIsLabLoading] = useState(false);
 
   const setCorpusId = useCallback((id: string | null) => {
     corpusIdRef.current = id;
     setCorpusIdState(id);
   }, []);
+
+  useEffect(() => {
+    isAnalyzingRef.current = isAnalyzing;
+  }, [isAnalyzing]);
 
   useEffect(() => {
     analysisRef.current = analysis;
@@ -165,7 +206,11 @@ export function TerminalProvider({
     [debouncedPreview, ticker],
   );
 
-  const analyze = useCallback(async (thesisPoints?: AnalyzeResponse["thesis_points"]) => {
+  const analyze = useCallback(async (
+    thesisPoints?: AnalyzeResponse["thesis_points"],
+    options?: { enable_research?: boolean },
+  ) => {
+    if (isAnalyzingRef.current) return;
     setIsAnalyzing(true);
     setError(null);
     setIsCached(false);
@@ -177,7 +222,10 @@ export function TerminalProvider({
         ticker as Ticker,
         activeScenario,
         points,
-        corpusIdRef.current ? { corpus_id: corpusIdRef.current } : undefined,
+        {
+          ...(corpusIdRef.current ? { corpus_id: corpusIdRef.current } : {}),
+          enable_research: options?.enable_research ?? false,
+        },
       );
       setAnalysis(result);
       skipHistoryRef.current = true;
@@ -188,6 +236,7 @@ export function TerminalProvider({
       historyIndexRef.current = 0;
       setLastUpdated(result.timestamp);
       setPreview(null);
+      lastToastedErrorRef.current = null;
       try {
         sessionStorage.setItem(`sovereign-analysis-${ticker}`, JSON.stringify(result));
       } catch {
@@ -197,7 +246,11 @@ export function TerminalProvider({
     } catch (e) {
       const apiError = classifyFetchError(e);
       setError(apiError);
-      toastApiError(apiError, { onRetry: () => void analyze() });
+      const errorKey = `${apiError.kind}:${apiError.message}`;
+      if (lastToastedErrorRef.current !== errorKey) {
+        lastToastedErrorRef.current = errorKey;
+        toastApiError(apiError, { onRetry: () => void analyze(thesisPoints, options) });
+      }
       try {
         const cached = sessionStorage.getItem(`sovereign-analysis-${ticker}`);
         if (cached) {
@@ -207,6 +260,7 @@ export function TerminalProvider({
       } catch {
         /* ignore */
       }
+      throw apiError;
     } finally {
       setIsAnalyzing(false);
     }
@@ -217,12 +271,66 @@ export function TerminalProvider({
     setIsCached(false);
     setLastUpdated(result.timestamp);
     setError(null);
+    if (result.valuation_lab) {
+      setValuationLabState(result.valuation_lab as ValuationLabSnapshot);
+      persistValuationLab(result.ticker, result.valuation_lab as ValuationLabSnapshot);
+    }
     try {
       sessionStorage.setItem(`sovereign-analysis-${result.ticker}`, JSON.stringify(result));
     } catch {
       /* ignore quota */
     }
   }, []);
+
+  const setValuationLab = useCallback((snap: ValuationLabSnapshot | null) => {
+    setValuationLabState(snap);
+    if (snap) persistValuationLab(ticker, snap);
+  }, [ticker]);
+
+  const runValuationLab = useCallback(async (useLlm = false) => {
+    setIsLabLoading(true);
+    try {
+      const research = analysisRef.current?.research_results as Record<string, unknown> | undefined;
+      const snap = await generateValuationLab(ticker, useLlm, research);
+      setValuationLabState(snap);
+      persistValuationLab(ticker, snap);
+      toast.success(`Valuation lab updated for ${ticker}`);
+    } catch (e) {
+      toastApiError(classifyFetchError(e), { message: "Valuation lab failed" });
+      throw e;
+    } finally {
+      setIsLabLoading(false);
+    }
+  }, [ticker]);
+
+  const applyLabDistribution = useCallback((distribution: MemoDistribution) => {
+    setAnalysis((prev) => {
+      if (!prev) return prev;
+      const next = {
+        ...prev,
+        memo: {
+          ...prev.memo,
+          distribution,
+          price_target: distribution.base.price,
+        },
+      };
+      try {
+        sessionStorage.setItem(`sovereign-analysis-${ticker}`, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+    setPreview((prev) =>
+      prev
+        ? {
+            ...prev,
+            distribution,
+            price_target: distribution.base.price,
+          }
+        : prev,
+    );
+  }, [ticker]);
 
   const onIngestResult = useCallback(
     (extraction: IngestExtraction) => {
@@ -339,7 +447,22 @@ export function TerminalProvider({
     setHydrated(true);
     setPreview(null);
 
-    void analyze();
+    const storedLab = loadStoredValuationLab(ticker);
+    if (storedLab) {
+      setValuationLabState(storedLab);
+    } else {
+      setValuationLabState(null);
+    }
+
+    if (analyzeTimerRef.current) clearTimeout(analyzeTimerRef.current);
+    analyzeTimerRef.current = setTimeout(() => {
+      if (isAnalyzingRef.current) return;
+      void analyze(undefined, { enable_research: false });
+    }, 300);
+
+    return () => {
+      if (analyzeTimerRef.current) clearTimeout(analyzeTimerRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run on ticker change only
   }, [ticker]);
 
@@ -368,6 +491,11 @@ export function TerminalProvider({
       applyScenarioField,
       undoScenario,
       redoScenario,
+      valuationLab,
+      setValuationLab,
+      runValuationLab,
+      applyLabDistribution,
+      isLabLoading,
     }),
     [
       ticker,
@@ -392,6 +520,11 @@ export function TerminalProvider({
       applyScenarioField,
       undoScenario,
       redoScenario,
+      valuationLab,
+      setValuationLab,
+      runValuationLab,
+      applyLabDistribution,
+      isLabLoading,
     ],
   );
 

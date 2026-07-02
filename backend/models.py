@@ -19,7 +19,156 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     email: Mapped[str | None] = mapped_column(String(256), nullable=True)
     plan_tier: Mapped[str] = mapped_column(String(32), default="free")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    beta_invite_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    beta_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class WaitlistSubscriber(Base):
+    __tablename__ = "waitlist_subscribers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(128), default="landing")
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class BetaApplication(Base):
+    __tablename__ = "beta_applications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(256), index=True)
+    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    firm: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    use_case: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    invite_code: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class EnterpriseLead(Base):
+    __tablename__ = "enterprise_leads"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    firm: Mapped[str] = mapped_column(String(256))
+    email: Mapped[str] = mapped_column(String(256), index=True)
+    aum_band: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class OnboardingEvent(Base):
+    __tablename__ = "onboarding_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Organisation(Base):
+    __tablename__ = "organisations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(256))
+    slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    clerk_org_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True, index=True)
+    branding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class OrgMembership(Base):
+    __tablename__ = "org_memberships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    role: Mapped[str] = mapped_column(String(32), default="viewer")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    role: Mapped[str] = mapped_column(String(32), default="analyst")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class SharedThesis(Base):
+    __tablename__ = "shared_theses"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft")
+    shared_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ThesisAnnotation(Base):
+    __tablename__ = "thesis_annotations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    thesis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    section_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    resource_type: Mapped[str] = mapped_column(String(64))
+    resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    requested_by: Mapped[str] = mapped_column(String(128), index=True)
+    approved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(128), index=True)
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
 
 
 class Watchlist(Base):
@@ -27,6 +176,7 @@ class Watchlist(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128), default="Default")
     tickers: Mapped[list] = mapped_column(JSONB, default=lambda: [])
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -37,6 +187,7 @@ class Holding(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     shares: Mapped[float] = mapped_column(Float)
     cost_basis: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -49,6 +200,7 @@ class ThesisAnalysis(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     scenario: Mapped[dict] = mapped_column(JSONB)
     result: Mapped[dict] = mapped_column(JSONB)
@@ -62,6 +214,7 @@ class ThesisHealthSnapshot(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     score: Mapped[float] = mapped_column(Float)
     target: Mapped[float] = mapped_column(Float)
@@ -75,6 +228,7 @@ class IngestedDocument(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     filename: Mapped[str] = mapped_column(String(512))
     file_size_kb: Mapped[float | None] = mapped_column(nullable=True)
     extraction: Mapped[dict] = mapped_column(JSONB)
@@ -90,6 +244,7 @@ class DocumentCorpus(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(256))
     document_ids: Mapped[list] = mapped_column(JSONB, default=lambda: [])
@@ -115,6 +270,7 @@ class PortfolioSnapshot(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     scenario: Mapped[dict] = mapped_column(JSONB)
     thesis_points: Mapped[list] = mapped_column(JSONB, default=lambda: [])
@@ -127,6 +283,7 @@ class AlertRule(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16))
     condition: Mapped[str] = mapped_column(String(64))
     channel: Mapped[str] = mapped_column(String(32), default="in_app")
@@ -141,6 +298,7 @@ class Report(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     ticker: Mapped[str] = mapped_column(String(16))
     analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     share_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -171,6 +329,7 @@ class ApiKey(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     key_hash: Mapped[str] = mapped_column(String(128), unique=True)
     plan_tier: Mapped[str] = mapped_column(String(32), default="free")
     rate_limit: Mapped[int] = mapped_column(default=100)
@@ -180,13 +339,13 @@ class ApiKey(Base):
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    document_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     source_type: Mapped[str] = mapped_column(String(32), index=True)
     page: Mapped[int | None] = mapped_column(nullable=True)
     chunk_text: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     chunk_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
 
@@ -196,6 +355,7 @@ class WorkflowRun(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     goal: Mapped[str] = mapped_column(Text)
     ticker: Mapped[str] = mapped_column(String(16), default="", index=True)
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
@@ -217,3 +377,28 @@ class MemoFeedback(Base):
     vote: Mapped[str] = mapped_column(String(8))
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class FilingEvent(Base):
+    __tablename__ = "filing_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    form: Mapped[str] = mapped_column(String(16))
+    accession: Mapped[str] = mapped_column(String(32), index=True)
+    filed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    analysis_triggered: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
+
+class FilingWatchSubscription(Base):
+    __tablename__ = "filing_watch_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    forms: Mapped[list] = mapped_column(JSONB, default=lambda: ["10-Q", "8-K"])
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

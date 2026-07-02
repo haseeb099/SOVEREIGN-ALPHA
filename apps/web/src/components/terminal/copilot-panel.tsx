@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Send, Trash2 } from "lucide-react";
 import type { Holding } from "@sovereign/shared";
 import { useTerminal } from "@/providers/terminal-provider";
@@ -90,11 +91,19 @@ export function CopilotPanel() {
       .finally(() => setCtxLoading(false));
   }, []);
 
-  const subtitle = useMemo(() => {
+  const subtitle = useMemo((): ReactNode => {
     if (ctxLoading) return null;
     if (ctxError) return "Portfolio unavailable — answers use ticker context only.";
     if (holdings.length === 0) {
-      return "Portfolio empty — add holdings for better context.";
+      return (
+        <>
+          Portfolio empty —{" "}
+          <Link href="/portfolio" className="text-primary hover:underline">
+            add holdings
+          </Link>{" "}
+          for better context.
+        </>
+      );
     }
     return `Grounded on ${holdings.length} holdings (${formatUsd(totalValue, true)})`;
   }, [ctxLoading, ctxError, holdings.length, totalValue]);
@@ -165,7 +174,12 @@ export function CopilotPanel() {
             {ctxLoading ? (
               <Skeleton className="mt-1 h-3 w-48" />
             ) : (
-              <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {subtitle}{" "}
+                <Link href="/portfolio" className="text-primary hover:underline">
+                  → Portfolio
+                </Link>
+              </p>
             )}
           </div>
           {messages.length > 0 && (

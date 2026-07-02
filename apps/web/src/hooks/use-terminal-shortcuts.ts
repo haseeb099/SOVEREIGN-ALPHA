@@ -18,11 +18,15 @@ export function useTerminalShortcuts({
   onShowShortcuts,
   onGoToTracker,
   onGoToCharts,
+  onGoToDossier,
+  onGoToLab,
 }: {
   onToggleScenario?: () => void;
   onShowShortcuts?: () => void;
   onGoToTracker?: () => void;
   onGoToCharts?: () => void;
+  onGoToDossier?: () => void;
+  onGoToLab?: () => void;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -36,6 +40,14 @@ export function useTerminalShortcuts({
         e.preventDefault();
         onGoToCharts();
       }
+      if (e.altKey && (e.key === "d" || e.key === "D") && onGoToDossier) {
+        e.preventDefault();
+        onGoToDossier();
+      }
+      if (e.altKey && (e.key === "l" || e.key === "L") && onGoToLab) {
+        e.preventDefault();
+        onGoToLab();
+      }
       if ((e.key === "s" || e.key === "S") && !e.altKey && onToggleScenario) {
         e.preventDefault();
         onToggleScenario();
@@ -47,5 +59,5 @@ export function useTerminalShortcuts({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onToggleScenario, onShowShortcuts, onGoToTracker, onGoToCharts]);
+  }, [onToggleScenario, onShowShortcuts, onGoToTracker, onGoToCharts, onGoToDossier, onGoToLab]);
 }

@@ -103,6 +103,19 @@ Sovereign-Alpha is a full-stack **AI Investment Intelligence OS** delivered as a
 
 Optional: Cerebras API key, Polygon/NewsAPI keys, Clerk keys for auth in staging/production.
 
+## First-time setup
+
+1. Copy environment: `cp .env.example .env`
+2. Start Postgres and Redis: `docker compose up -d redis postgres`
+3. Apply migrations: `pnpm db:migrate`
+4. Set these in `.env` before running analysis:
+   - `CEREBRAS_API_KEY` — required for `/api/analyze` and copilot
+   - `POLYGON_API_KEY` — live quotes (optional; yfinance fallback when unset)
+   - `SKIP_DB_INIT=false` — enables persistence, workspaces, and portfolio features
+   - `DATABASE_URL=postgresql://sovereign:sovereign@localhost:5433/sovereign_alpha` — must match docker-compose Postgres
+
+**Troubleshooting 503 / "temporarily unavailable":** If portfolio, library, or settings return 503, Postgres is not reachable. Run `docker compose up -d redis postgres`, set `SKIP_DB_INIT=false` in `.env`, then `pnpm db:migrate`. Restart the API with `pnpm dev:api`.
+
 ## Repository layout
 
 ```
@@ -174,6 +187,15 @@ Redis/Postgres only:
 
 ```bash
 docker compose up -d redis postgres
+pnpm db:migrate
+```
+
+**Without Docker:** install [PostgreSQL](https://www.postgresql.org/download/) and Redis locally, then create the database and point `DATABASE_URL` / `REDIS_URL` in `.env`. Run `pnpm db:migrate` with `SKIP_DB_INIT=false`.
+
+Seed the demo tenant (TSLA/NVDA/AAPL analyses, holdings, community cards):
+
+```bash
+pnpm db:seed-demo
 ```
 
 ### 4. Install dependencies
@@ -243,6 +265,26 @@ pnpm dev       # terminal 2
 ```
 
 Full Docker stack (`docker compose up -d`) uses container networking for Redis/Postgres automatically.
+
+### Phase 22 — Enterprise features (local)
+
+After starting Postgres, apply migration 008:
+
+```bash
+pnpm db:migrate
+```
+
+Enterprise endpoints (require DB for persistence):
+
+| Path | Purpose |
+|------|---------|
+| `GET /api/org/branding` | White-label config |
+| `GET/POST /api/workspaces` | Team workspaces |
+| `GET /api/audit` | Immutable audit log (Admin) |
+| `GET /metrics` | Prometheus metrics |
+| `GET /api/v1/public/status` | Enterprise API SLA metadata |
+
+If Docker Desktop is not running, set `SKIP_DB_INIT=true` in `.env` so the API starts without hanging on Postgres. Workspaces, audit logs, and portfolio persistence require `docker compose up -d redis postgres`.
 
 ## API reference
 

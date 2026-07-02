@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sovereign-alpha-watcher
+  namespace: sovereign-alpha
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: watcher
+              image: sovereign-alpha-api:latest
+              command: ["python", "-m", "services.watcher_service", "--once"]
+              envFrom:
+                - configMapRef:
+                    name: sovereign-alpha-config
+                - secretRef:
+                    name: sovereign-alpha-secrets

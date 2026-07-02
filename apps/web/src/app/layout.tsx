@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/providers/auth-provider";
+import { BrandingProvider } from "@/providers/branding-provider";
 import { DisclaimerFooter } from "@/components/layout/disclaimer-footer";
 import "./globals.css";
 
@@ -43,8 +44,10 @@ export default function RootLayout({
     <html lang="en" className={`dark ${ibmSans.variable} ${ibmMono.variable}`}>
       <body className="min-h-dvh antialiased font-sans">
         <AuthProvider>
-          {children}
-          <DisclaimerFooter />
+          <BrandingProvider>
+            {children}
+            <DisclaimerFooter />
+          </BrandingProvider>
         </AuthProvider>
         <Toaster theme="dark" position="top-right" />
       </body>

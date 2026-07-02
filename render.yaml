@@ -1,6 +1,24 @@
 # Render: FastAPI backend only. Deploy apps/web to Vercel (see vercel.json).
-# Render Blueprint â€” https://render.com/docs/blueprint-spec
-# Connect repo â†’ New Blueprint â†’ point at this file â†’ set secret env vars in dashboard.
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Connect repo → New Blueprint → point at this file → set secret env vars in dashboard.
+#
+# Required secrets (set in Render dashboard; sync: false below):
+#   CEREBRAS_API_KEY  — LLM inference (required for analyze)
+#   ALLOWED_ORIGINS   — comma-separated frontend origins (e.g. https://your-app.vercel.app)
+#   CLERK_SECRET_KEY  — auth (optional if Clerk disabled)
+#   NEWS_API_KEY      — macro headlines (optional)
+#   SENTRY_DSN        — error reporting (optional)
+#
+# Auto-wired from linked resources:
+#   DATABASE_URL      — from sovereign-alpha-db (PostgreSQL)
+#   REDIS_URL         — from sovereign-alpha-redis
+#
+# Recommended production vars (add in dashboard if not in blueprint):
+#   POLYGON_API_KEY   — live market data; without it yfinance fallback is sparse
+#   SKIP_DB_INIT=false — run migrations on boot (default false in Docker entrypoint)
+#   POLYGON_API_KEY, NEWS_API_KEY, CLERK_SECRET_KEY — see .env.example
+#
+# Vercel (frontend): set NEXT_PUBLIC_API_URL to this service URL (e.g. https://sovereign-alpha-api.onrender.com)
 
 services:
   - type: web
@@ -21,6 +39,10 @@ services:
         value: gemma-4-31b
       - key: CEREBRAS_API_KEY
         sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: SKIP_DB_INIT
+        value: "false"
       - key: NEWS_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
@@ -34,6 +56,40 @@ services:
           type: redis
           name: sovereign-alpha-redis
           property: connectionString
+      - key: WATCHER_ENABLED
+        value: "true"
+      - key: WATCHER_POLL_INTERVAL_SECONDS
+        value: "300"
+      - key: SENTRY_DSN
+        sync: false
+      - key: PROMETHEUS_METRICS_ENABLED
+        value: "true"
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: SKIP_DB_INIT
+        value: "false"
+
+  - type: cron
+    name: sovereign-alpha-watcher-cron
+    schedule: "*/5 * * * *"
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    dockerCommand: python -m services.watcher_service --once
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sovereign-alpha-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sovereign-alpha-redis
+          property: connectionString
+      - key: WATCHER_ENABLED
+        value: "true"
 
   - type: redis
     name: sovereign-alpha-redis

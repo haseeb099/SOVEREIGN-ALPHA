@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { PanelRight, Loader2 } from "lucide-react";
 import { DEFAULT_SCENARIO } from "@sovereign/shared";
 import { useTerminal } from "@/providers/terminal-provider";
@@ -78,11 +78,18 @@ export function RightSidebar({
     undoScenario,
     redoScenario,
     analyze,
+    error: analysisError,
   } = useTerminal();
   const [nlScenario, setNlScenario] = useState("");
   const [nlParsing, setNlParsing] = useState(false);
   const [nlExplanation, setNlExplanation] = useState<string | null>(null);
   const [nlError, setNlError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (analysisError) {
+      setNlParsing(false);
+    }
+  }, [analysisError]);
 
   if (collapsed) {
     return (
@@ -237,7 +244,13 @@ export function RightSidebar({
               variant="secondary"
               className="h-8 font-mono text-[9px] uppercase"
               disabled={isAnalyzing}
-              onClick={() => void analyze()}
+              onClick={async () => {
+                try {
+                  await analyze();
+                } catch {
+                  /* error surfaced via toast + analysisError */
+                }
+              }}
             >
               {isAnalyzing ? (
                 <>

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
-import { RefreshCw } from "lucide-react";
-import { AppNavigation, AppWordmark } from "@/components/layout/app-nav";
+import Link from "next/link";
+import { ArrowLeft, RefreshCw } from "lucide-react";
+import { AppNav, AppNavigation, AppWordmark } from "@/components/layout/app-nav";
 import { LocalSessionBanner } from "@/components/layout/local-session-banner";
 import { SystemStatusBar } from "@/components/layout/system-status-bar";
 import { useSystemHealth } from "@/hooks/use-system-health";
@@ -19,6 +20,8 @@ export function DashboardShell({
   refreshing,
   actions,
   className,
+  backHref,
+  showMobileNav = true,
 }: {
   title: string;
   subtitle?: string;
@@ -27,6 +30,8 @@ export function DashboardShell({
   refreshing?: boolean;
   actions?: ReactNode;
   className?: string;
+  backHref?: string;
+  showMobileNav?: boolean;
 }) {
   const { health, status, wsConnected, lastFetchAt, refresh } = useSystemHealth();
   const [healthRefreshing, setHealthRefreshing] = useState(false);
@@ -48,16 +53,33 @@ export function DashboardShell({
 
   return (
     <div className="min-h-dvh bg-background pb-14 md:pb-0">
-      <header className="border-b border-border bg-card/60">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-2.5">
-          <div className="min-w-0 flex-1">
-            <AppWordmark className="panel-label text-[10px] font-normal uppercase tracking-widest text-muted-foreground" />
+      <header className="sticky top-0 z-30 border-b border-border bg-card">
+        {/* Primary nav toolbar — matches terminal top bar */}
+        <div className="mx-auto flex max-w-7xl items-center gap-2 border-b border-border/40 px-3 py-2 sm:gap-3">
+          <AppWordmark className="shrink-0 text-xs" />
+          <AppNav className="hidden min-w-0 flex-1 md:flex" />
+        </div>
+
+        {/* Page context row */}
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 bg-card/60 px-4 py-2.5">
+          <div className="min-w-0">
             <h1 className="font-mono text-lg font-semibold tracking-tight">{title}</h1>
             {subtitle && (
               <p className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</p>
             )}
           </div>
           <div className="flex items-center gap-2">
+            {backHref && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 font-mono text-[10px] uppercase"
+                render={<Link href={backHref} />}
+              >
+                <ArrowLeft className="size-3" />
+                Back
+              </Button>
+            )}
             {actions}
             {onRefresh && (
               <Button
@@ -71,7 +93,6 @@ export function DashboardShell({
                 Refresh
               </Button>
             )}
-            <AppNavigation />
           </div>
         </div>
       </header>
@@ -86,6 +107,10 @@ export function DashboardShell({
         refreshing={healthRefreshing}
       />
       <main className={cn("mx-auto max-w-7xl p-4 md:p-5", className)}>{children}</main>
+
+      <div className={cn(!showMobileNav && "hidden", "md:hidden")}>
+        <AppNavigation />
+      </div>
     </div>
   );
 }

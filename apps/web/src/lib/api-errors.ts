@@ -24,18 +24,35 @@ const GENERIC_SERVER_MESSAGES = new Set(
   ].map((s) => s.toLowerCase()),
 );
 
+const DB_UNAVAILABLE_PATTERNS = [
+  "database unavailable",
+  "docker compose",
+  "skip_db_init",
+  "pnpm db:migrate",
+  "postgres",
+  "feature temporarily unavailable",
+];
+
+const SERVICE_UNAVAILABLE_COPY =
+  "This feature is temporarily unavailable. Try again shortly.";
+
 /** Map generic API failure strings to user-friendly copy. */
-export function sanitizeServerMessage(msg: string): string {
+export function sanitizeServerMessage(msg: string, status?: number): string {
   const trimmed = msg.trim();
   if (!trimmed) {
-    return "Analysis service unavailable. Try again in a moment.";
+    return status === 503
+      ? SERVICE_UNAVAILABLE_COPY
+      : "Analysis service unavailable. Try again in a moment.";
   }
   const lower = trimmed.toLowerCase();
+  if (status === 503 || DB_UNAVAILABLE_PATTERNS.some((p) => lower.includes(p))) {
+    return SERVICE_UNAVAILABLE_COPY;
+  }
   if (GENERIC_SERVER_MESSAGES.has(lower)) {
     return "Analysis service unavailable. Try again in a moment.";
   }
   if (/^request failed \(\d{3}\)$/.test(lower)) {
-    return "Analysis service unavailable. Try again in a moment.";
+    return status === 503 ? SERVICE_UNAVAILABLE_COPY : "Analysis service unavailable. Try again in a moment.";
   }
   return trimmed;
 }
@@ -79,11 +96,7 @@ export function classifyFetchError(err: unknown): ApiError {
       return new ApiError("Sign in required to access this resource.", "auth", 401);
     }
     if (err.message.includes("503")) {
-      return new ApiError(
-        "Service temporarily unavailable. Check API configuration (e.g. CEREBRAS_API_KEY).",
-        "server",
-        503,
-      );
+      return new ApiError(SERVICE_UNAVAILABLE_COPY, "server", 503);
     }
     if (isOfflineMessage(err.message)) {
       return new ApiError(
@@ -117,7 +130,7 @@ export function friendlyErrorDescription(err: ApiError): string {
     case "server":
       return sanitizeServerMessage(err.message);
     case "auth":
-      return "Sign in to save portfolio holdings, alert rules, and library documents.";
+      return "Sign in required to save portfolio holdings, alert rules, and library documents.";
     default:
       return sanitizeServerMessage(err.message);
   }
@@ -125,6 +138,13 @@ export function friendlyErrorDescription(err: ApiError): string {
 
 export function friendlyOfflineToast(): string {
   return "Connecting to Sovereign — retrying automatically…";
+}
+
+const recentToastKeys = new Map<string, number>();
+const TOAST_DEDUP_MS = 8000;
+
+function toastDedupKey(err: ApiError, message: string): string {
+  return `${err.kind}:${err.status ?? ""}:${message}`;
 }
 
 export function toastApiError(
@@ -143,7 +163,17 @@ export function toastApiError(
     description = friendlyErrorDescription(apiError);
   }
 
+  const dedupKey = toastDedupKey(apiError, description);
+  const now = Date.now();
+  const lastShown = recentToastKeys.get(dedupKey);
+  if (lastShown != null && now - lastShown < TOAST_DEDUP_MS) {
+    return;
+  }
+  recentToastKeys.set(dedupKey, now);
+
   toast.error(description, {
+    id: dedupKey,
+    duration: 8000,
     ...(options?.onRetry
       ? { action: { label: "Retry", onClick: options.onRetry } }
       : {}),
@@ -178,7 +208,8 @@ export function parseFastApiDetail(text: string): string {
 }
 
 export function apiErrorFromResponse(text: string, status: number): ApiError {
-  const message = parseFastApiDetail(text) || `Request failed (${status})`;
+  const raw = parseFastApiDetail(text) || `Request failed (${status})`;
+  const message = sanitizeServerMessage(raw, status);
   const kind: ApiErrorKind =
     status === 401 ? "auth" : status >= 500 ? "server" : "unknown";
   return new ApiError(message, kind, status);

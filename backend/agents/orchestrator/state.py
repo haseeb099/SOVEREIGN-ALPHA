@@ -23,6 +23,18 @@ class AnalysisState(TypedDict, total=False):
     pipeline_audit: list
     elapsed: float
     pipeline_result: dict
+    enable_research: bool
+    research_brief: str
+    research_results: dict
+    research_traces: list
+    research_timings: dict
+    red_team_signals: dict
+    enable_research: bool
+    research_brief: str
+    research_results: dict
+    research_traces: list
+    research_tool_outputs: dict
+    red_team_signals: dict
 
 
 class WorkflowState(TypedDict, total=False):

@@ -126,6 +126,11 @@ export function WorkflowPanel({
     }
   }, [workflow?.status]);
 
+  const dismissHitlDialog = (open: boolean) => {
+    setHitlOpen(open);
+    if (!open) toast.dismiss();
+  };
+
   const startWorkflow = async () => {
     setStarting(true);
     completedRef.current = false;
@@ -260,9 +265,13 @@ export function WorkflowPanel({
           )}
 
           {workflow.status === "failed" && (
-            <p className="text-[11px] text-destructive">
-              Workflow failed. Start a new run to try again.
-            </p>
+            <div className="space-y-1 text-[11px] text-destructive">
+              <p>Workflow failed. Check API health and try a new run.</p>
+              <p className="text-muted-foreground">
+                If this persists, verify CEREBRAS_API_KEY and backend logs, then start a fresh
+                workflow from the button below.
+              </p>
+            </div>
           )}
 
           {workflow.status === "cancelled" && (
@@ -316,7 +325,7 @@ export function WorkflowPanel({
         </>
       )}
 
-      <Dialog open={hitlOpen} onOpenChange={setHitlOpen}>
+      <Dialog open={hitlOpen} onOpenChange={dismissHitlDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-sm">Approve workflow checkpoint?</DialogTitle>

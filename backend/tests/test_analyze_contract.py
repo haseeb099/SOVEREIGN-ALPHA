@@ -125,13 +125,31 @@ async def test_pipeline_output_satisfies_contract(
     mock_cerebras_agent,
     sample_market_data,
     sample_scenario,
+    monkeypatch,
 ):
     from agents.pipeline import run_analysis_pipeline
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "agents.orchestrator.research_graph.run_research_pass",
+        AsyncMock(
+            return_value={
+                "research_brief": "RESEARCH_BRIEF:",
+                "research_results": {},
+                "research_traces": [],
+                "red_team_signals": {},
+                "retrieved_chunks": [],
+                "retrieved_sources": "RETRIEVED_SOURCES: (none)",
+                "pipeline_audit": [],
+            }
+        ),
+    )
 
     result = await run_analysis_pipeline(
         ticker="TSLA",
         market_data=sample_market_data,
         scenario=sample_scenario,
+        enable_research=True,
     )
 
     from services.sovereign_score_service import attach_sovereign_score

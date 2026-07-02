@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from middleware.auth import resolve_user_id
+from services.permission_service import get_org_id, require_permission
 from services.workflow_service import (
     get_workflow_status,
     resume_workflow,
     start_due_diligence_workflow,
+    verify_workflow_access,
 )
 
 router = APIRouter()
@@ -37,18 +39,24 @@ class ApproveRequest(BaseModel):
 
 @router.post("/workflows/due-diligence")
 async def start_due_diligence(body: DueDiligenceRequest, request: Request):
-    user_id = resolve_user_id(request)
+    user_id = require_permission(request, "analyze:run")
+    org_id = get_org_id(request)
     scenario = body.scenario.model_dump() if body.scenario else {}
     return await start_due_diligence_workflow(
         body.goal,
         scenario,
         user_id=user_id,
+        org_id=org_id,
         auto_approve=body.auto_approve,
     )
 
 
 @router.get("/workflows/{workflow_id}")
-async def get_workflow(workflow_id: str):
+async def get_workflow(workflow_id: str, request: Request):
+    user_id = require_permission(request, "thesis:read")
+    org_id = get_org_id(request)
+    if not await verify_workflow_access(workflow_id, user_id, org_id):
+        raise HTTPException(status_code=404, detail="Workflow not found")
     status = await get_workflow_status(workflow_id)
     if not status:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -56,7 +64,13 @@ async def get_workflow(workflow_id: str):
 
 
 @router.post("/workflows/{workflow_id}/approve")
-async def approve_workflow_checkpoint(workflow_id: str, body: ApproveRequest):
+async def approve_workflow_checkpoint(
+    workflow_id: str, body: ApproveRequest, request: Request
+):
+    user_id = require_permission(request, "analyze:run")
+    org_id = get_org_id(request)
+    if not await verify_workflow_access(workflow_id, user_id, org_id):
+        raise HTTPException(status_code=404, detail="Workflow not found")
     current = await get_workflow_status(workflow_id)
     if not current:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -77,7 +91,11 @@ async def approve_workflow_checkpoint(workflow_id: str, body: ApproveRequest):
 
 
 @router.post("/workflows/{workflow_id}/reject")
-async def reject_workflow(workflow_id: str):
+async def reject_workflow(workflow_id: str, request: Request):
+    user_id = require_permission(request, "analyze:run")
+    org_id = get_org_id(request)
+    if not await verify_workflow_access(workflow_id, user_id, org_id):
+        raise HTTPException(status_code=404, detail="Workflow not found")
     current = await get_workflow_status(workflow_id)
     if not current:
         raise HTTPException(status_code=404, detail="Workflow not found")

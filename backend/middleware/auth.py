@@ -15,6 +15,8 @@ CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 CLERK_JWKS_URL = os.environ.get("CLERK_JWKS_URL", "")
 CLERK_ISSUER = os.environ.get("CLERK_ISSUER", "")
 DEV_LOCAL_USER = "dev-local-user"
+DEV_LOCAL_ORG = "dev-local-org"
+DEV_LOCAL_ORG_ID = "dev-local-org"
 
 
 def dev_auth_enabled() -> bool:
@@ -83,16 +85,54 @@ def _decode_clerk_token(token: str) -> Optional[dict]:
         return None
 
 
-def extract_user_id(request: Request) -> Optional[str]:
-    """Extract Clerk user id (sub) from Authorization header."""
+def extract_token_payload(request: Request) -> Optional[dict]:
+    """Extract decoded JWT payload from Authorization header."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         return None
     token = auth[7:]
+    return _decode_clerk_token(token)
+
+
+def extract_org_context(request: Request) -> tuple[Optional[str], Optional[str]]:
+    """Extract org_id and org_role from Clerk JWT claims."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None, None
+    token = auth[7:]
     payload = _decode_clerk_token(token)
+    if not payload:
+        return None, None
+    org_id = payload.get("org_id")
+    org_role = payload.get("org_role")
+    org_claim = payload.get("o")
+    if isinstance(org_claim, dict):
+        org_id = org_id or org_claim.get("id")
+        org_role = org_role or org_claim.get("rol")
+    if org_role and ":" in str(org_role):
+        org_role = str(org_role).split(":")[-1]
+    return org_id, (org_role.lower() if org_role else None)
+
+
+def extract_user_id(request: Request) -> Optional[str]:
+    """Extract Clerk user id (sub) from Authorization header."""
+    payload = extract_token_payload(request)
     if payload:
         return payload.get("sub")
     return None
+
+
+def extract_org_claims_from_payload(payload: dict | None) -> tuple[Optional[str], Optional[str]]:
+    """Extract Clerk org_id and org_role from JWT payload."""
+    if not payload:
+        return None, None
+    org_id = payload.get("org_id")
+    org_role = payload.get("org_role")
+    nested = payload.get("o")
+    if isinstance(nested, dict):
+        org_id = org_id or nested.get("id")
+        org_role = org_role or nested.get("rol")
+    return org_id, org_role
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -101,9 +141,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
-        request.state.user_id = extract_user_id(request)
+        payload = extract_token_payload(request)
+        request.state.user_id = payload.get("sub") if payload else None
+        clerk_org_id, org_role = extract_org_claims_from_payload(payload)
+        request.state.clerk_org_id = clerk_org_id
+        request.state.org_role = org_role
         if not request.state.user_id and dev_auth_enabled():
             request.state.user_id = DEV_LOCAL_USER
+            request.state.org_role = "admin"
         return await call_next(request)
 
 

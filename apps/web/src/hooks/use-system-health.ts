@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { HealthResponse, TelemetryEvent } from "@sovereign/shared";
 import { fetchHealth, getWsUrl } from "@/lib/api";
 
-export type ConnectionStatus = "live" | "degraded" | "offline";
+export type ConnectionStatus = "live" | "degraded" | "offline" | "connecting";
 
 function mapHealthStatus(apiStatus: string | undefined): ConnectionStatus {
   if (apiStatus === "online") return "live";
@@ -14,12 +14,15 @@ function mapHealthStatus(apiStatus: string | undefined): ConnectionStatus {
 
 export function useSystemHealth(pollMs = 15000) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [status, setStatus] = useState<ConnectionStatus>("offline");
+  const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [wsConnected, setWsConnected] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<Date | null>(null);
   const initialPoll = useRef(true);
 
   const refresh = useCallback(async () => {
+    if (initialPoll.current) {
+      setStatus("connecting");
+    }
     try {
       const data = await fetchHealth();
       setHealth(data);

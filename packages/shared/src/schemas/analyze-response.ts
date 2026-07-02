@@ -26,6 +26,7 @@ export const MemoDistributionSchema = z.object({
   base: DistributionCaseSchema,
   bull: DistributionCaseSchema,
 });
+export type MemoDistribution = z.infer<typeof MemoDistributionSchema>;
 
 export const MemoSchema = z.object({
   bull_verdict: z.string(),
@@ -71,8 +72,24 @@ export const CitationSchema = z.object({
 });
 export type Citation = z.infer<typeof CitationSchema>;
 
+export const ResearchAgentNameSchema = z.enum([
+  "COMPANY_RESEARCH",
+  "SECTOR_MACRO",
+  "COMPETITIVE",
+  "ESG",
+  "INSIDER",
+  "OPTIONS_FLOW",
+]);
+export type ResearchAgentName = z.infer<typeof ResearchAgentNameSchema>;
+
 export const AgentNameSchema = z.enum([
   "PLANNING",
+  "COMPANY_RESEARCH",
+  "SECTOR_MACRO",
+  "COMPETITIVE",
+  "ESG",
+  "INSIDER",
+  "OPTIONS_FLOW",
   "FUNDAMENTAL",
   "MACRO",
   "BULL",
@@ -81,6 +98,79 @@ export const AgentNameSchema = z.enum([
   "VERIFICATION",
 ]);
 export type AgentName = z.infer<typeof AgentNameSchema>;
+
+export const PeerComparisonRowSchema = z.object({
+  ticker: z.string(),
+  name: z.string().optional(),
+  revenue_growth: z.union([z.number(), z.string()]).optional(),
+  revenue_growth_pct: z.union([z.number(), z.string()]).optional(),
+  gross_margin: z.union([z.number(), z.string()]).optional(),
+  gross_margin_pct: z.union([z.number(), z.string()]).optional(),
+  operating_margin: z.union([z.number(), z.string()]).optional(),
+  operating_margin_pct: z.union([z.number(), z.string()]).optional(),
+  valuation_multiple: z.union([z.number(), z.string()]).optional(),
+  pe_ratio: z.union([z.number(), z.string()]).optional(),
+  market_share: z.union([z.number(), z.string()]).optional(),
+  market_share_pct: z.union([z.number(), z.string()]).optional(),
+  summary: z.string().optional(),
+});
+export type PeerComparisonRow = z.infer<typeof PeerComparisonRowSchema>;
+
+export const CompetitiveResearchResultSchema = z.object({
+  subject_ticker: z.string().optional(),
+  peer_matrix: z.array(PeerComparisonRowSchema).optional(),
+  peers: z.array(PeerComparisonRowSchema).optional(),
+  competitive_position: z.string().optional(),
+  summary: z.string().optional(),
+  verdict: z.string().optional(),
+  insufficient_data: z.boolean().optional(),
+});
+export type CompetitiveResearchResult = z.infer<typeof CompetitiveResearchResultSchema>;
+
+export const ResearchBriefSchema = z.object({
+  summary: z.string().optional(),
+  highlights: z.array(z.string()).optional(),
+  red_team_signals: z
+    .object({
+      insider_sentiment: z.string().optional(),
+      options_flow: z.string().optional(),
+    })
+    .optional(),
+});
+export type ResearchBrief = z.infer<typeof ResearchBriefSchema>;
+
+export const ResearchResultsSchema = z.record(z.string(), z.unknown());
+export type ResearchResults = z.infer<typeof ResearchResultsSchema>;
+
+export const FilingEventSchema = z.object({
+  id: z.string().optional(),
+  ticker: z.string(),
+  form: z.string(),
+  accession: z.string().optional(),
+  filed_at: z.string().optional(),
+  ingested_at: z.string().optional(),
+  analysis_triggered: z.boolean().optional(),
+});
+export type FilingEvent = z.infer<typeof FilingEventSchema>;
+
+export const FilingWatchSubscriptionSchema = z.object({
+  id: z.string(),
+  ticker: z.string(),
+  forms: z.array(z.string()),
+  enabled: z.boolean(),
+  created_at: z.string().optional(),
+});
+export type FilingWatchSubscription = z.infer<typeof FilingWatchSubscriptionSchema>;
+
+export const WatcherStatusSchema = z.object({
+  enabled: z.boolean(),
+  last_poll_at: z.string().nullable().optional(),
+  poll_interval_seconds: z.number().optional(),
+  tickers_monitored: z.array(z.string()).optional(),
+  subscriptions: z.array(FilingWatchSubscriptionSchema).optional(),
+  recent_events: z.array(FilingEventSchema).optional(),
+});
+export type WatcherStatus = z.infer<typeof WatcherStatusSchema>;
 
 export const AgentTraceSchema = z.object({
   agent: AgentNameSchema,
@@ -131,6 +221,9 @@ export const AnalyzeResponseSchema = z
     memo: MemoSchema,
     thesis_points: z.array(ThesisPointSchema),
     agent_traces: z.array(AgentTraceSchema).optional(),
+    research_brief: z.string().optional(),
+    research_results: ResearchResultsSchema.optional(),
+    research_traces: z.array(AgentTraceSchema).optional(),
     agent_logs: z.array(AgentLogSchema),
     raw_agents: RawAgentsSchema,
     analysis_id: z.string().optional(),
@@ -466,6 +559,9 @@ export const AlertRuleSchema = z.object({
     "status_change",
     "price_move",
     "earnings_7d",
+    "new_filing",
+    "insider_activity",
+    "unusual_options",
   ]),
   channel: z.enum(["email", "in_app", "webhook"]),
   threshold: z.number().optional(),

@@ -2,6 +2,8 @@
 Sovereign-Alpha: AI Investment Intelligence OS
 FastAPI Backend Entry Point
 """
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -16,8 +18,8 @@ if _sentry_dsn:
         from sentry_sdk.integrations.fastapi import FastApiIntegration
 
         sentry_sdk.init(dsn=_sentry_dsn, integrations=[FastApiIntegration()], traces_sample_rate=0.1)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Sentry init failed: %s", exc)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,8 +31,10 @@ from cors_config import get_allowed_origins
 from database import init_db
 from middleware.auth import AuthMiddleware
 from middleware.logging_middleware import StructuredLoggingMiddleware
+from middleware.metrics import register_metrics_route
 from middleware.rate_limit import limiter
 from middleware.request_id import RequestIdMiddleware
+from middleware.tenant import TenantMiddleware
 from routers import (
     analyze,
     market,
@@ -47,18 +51,47 @@ from routers import (
     public_v1,
     feedback,
     workflows,
+    watchers,
+    valuation,
+    risk,
+    audit,
+    workspaces,
+    org,
+    api_keys,
+    billing,
+    waitlist,
+    beta,
+    enterprise_leads,
+    onboarding,
+    demo,
+    webhooks_clerk,
 )
 from services.health_service import build_health_payload
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    watcher_task = None
     try:
-        await init_db()
+        await asyncio.wait_for(init_db(), timeout=15)
+    except asyncio.TimeoutError:
+        logging.getLogger(__name__).warning("Database init timed out — continuing without DB")
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning("Database init skipped: %s", e)
+
+    if os.getenv("WATCHER_ENABLED", "true").lower() == "true":
+        from services.watcher_service import run_loop
+
+        watcher_task = asyncio.create_task(run_loop())
+
     yield
+
+    if watcher_task:
+        watcher_task.cancel()
+        try:
+            await watcher_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -68,12 +101,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+if os.getenv("PROMETHEUS_METRICS_ENABLED", "true").lower() == "true":
+    register_metrics_route(app)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(TenantMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
@@ -96,7 +133,21 @@ app.include_router(reports.router, prefix="/api")
 app.include_router(library.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(workflows.router, prefix="/api")
+app.include_router(watchers.router, prefix="/api")
 app.include_router(public_v1.router, prefix="/api")
+app.include_router(valuation.router, prefix="/api")
+app.include_router(risk.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
+app.include_router(workspaces.router, prefix="/api")
+app.include_router(org.router, prefix="/api")
+app.include_router(api_keys.router, prefix="/api")
+app.include_router(webhooks_clerk.router, prefix="/api")
+app.include_router(waitlist.router, prefix="/api")
+app.include_router(billing.router, prefix="/api")
+app.include_router(beta.router, prefix="/api")
+app.include_router(onboarding.router, prefix="/api")
+app.include_router(demo.router, prefix="/api")
+app.include_router(enterprise_leads.router, prefix="/api")
 
 
 @app.get("/health")

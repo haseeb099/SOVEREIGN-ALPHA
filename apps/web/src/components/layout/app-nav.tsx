@@ -2,15 +2,22 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
   GitCompare,
   LayoutDashboard,
+  Search,
   Settings,
+  Users,
+  CreditCard,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type { MarketSearchResult } from "@sovereign/shared";
+import { fetchMarketSearch } from "@/lib/api";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -22,6 +29,18 @@ const ClerkAuthSlot = hasClerk
       { ssr: false },
     )
   : null;
+
+const OrgSwitcher = hasClerk
+  ? dynamic(
+      () => import("@/components/layout/org-switcher").then((m) => m.OrgSwitcher),
+      { ssr: false },
+    )
+  : null;
+
+const BrandedWordmark = dynamic(
+  () => import("@/components/layout/branded-wordmark").then((m) => m.BrandedWordmark),
+  { ssr: false },
+);
 
 export const NAV = [
   {
@@ -47,6 +66,18 @@ export const NAV = [
     label: "Library",
     subtitle: "Document registry",
     icon: BookOpen,
+  },
+  {
+    href: "/community",
+    label: "Community",
+    subtitle: "Public thesis feed",
+    icon: Users,
+  },
+  {
+    href: "/pricing",
+    label: "Pricing",
+    subtitle: "Personal, Pro, Enterprise",
+    icon: CreditCard,
   },
   {
     href: "/settings",
@@ -132,7 +163,8 @@ export function AppNav({ className }: { className?: string }) {
   const pathname = usePathname();
 
   return (
-    <nav className={cn("flex items-center gap-0.5", className)} aria-label="Main">
+    <nav className={cn("flex min-w-0 flex-1 items-center gap-0.5", className)} aria-label="Main">
+      <AppNavTickerSearch />
       {NAV.map(({ href, label, subtitle, icon }) => {
         const active = pathname.startsWith(href);
         return (
@@ -148,11 +180,86 @@ export function AppNav({ className }: { className?: string }) {
         );
       })}
       {hasClerk && ClerkAuthSlot && (
-        <div className="ml-2 flex items-center border-l border-border pl-2">
+        <div className="ml-2 flex items-center gap-2 border-l border-border pl-2">
+          {OrgSwitcher && <OrgSwitcher />}
           <ClerkAuthSlot />
         </div>
       )}
     </nav>
+  );
+}
+
+function AppNavTickerSearch() {
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<MarketSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const navigate = (ticker: string) => {
+    const upper = ticker.toUpperCase();
+    setQuery("");
+    setShowSuggestions(false);
+    router.push(`/terminal/${upper}/memo`);
+  };
+
+  const onChange = (value: string) => {
+    const upper = value.toUpperCase();
+    setQuery(upper);
+    setShowSuggestions(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (upper.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      setSuggestions(await fetchMarketSearch(upper));
+      setSearching(false);
+    }, 300);
+  };
+
+  return (
+    <div className="relative mr-1 hidden min-w-0 max-w-[9rem] lg:block xl:max-w-[11rem]">
+      <Search className="absolute top-2 left-2 size-3 text-muted-foreground" aria-hidden />
+      <Input
+        value={query}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={async (e) => {
+          if (e.key === "Enter" && query.trim()) {
+            const results = await fetchMarketSearch(query.trim(), 5);
+            const match = results.find((r) => r.ticker === query.trim()) ?? results[0];
+            if (match) navigate(match.ticker);
+          }
+          if (e.key === "Escape") setShowSuggestions(false);
+        }}
+        onFocus={() => query.length > 0 && setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+        placeholder="Ticker…"
+        className="h-7 pl-7 font-mono text-[10px] focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="Search ticker"
+        autoComplete="off"
+      />
+      {showSuggestions && (searching || suggestions.length > 0) && (
+        <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border bg-popover shadow-lg">
+          {searching && (
+            <div className="p-2 text-[10px] text-muted-foreground">Searching…</div>
+          )}
+          {suggestions.map((s) => (
+            <button
+              key={s.ticker}
+              type="button"
+              className="flex w-full flex-col px-2 py-1.5 text-left text-[10px] hover:bg-muted"
+              onMouseDown={() => navigate(s.ticker)}
+            >
+              <span className="font-mono font-semibold">{s.ticker}</span>
+              {s.name && <span className="truncate text-muted-foreground">{s.name}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -200,14 +307,7 @@ export function AppNavigation({
 }
 
 export function AppWordmark({ className }: { className?: string }) {
-  return (
-    <Link
-      href="/terminal"
-      className={cn("font-mono text-sm font-semibold tracking-tight text-primary", className)}
-    >
-      Sovereign-Alpha
-    </Link>
-  );
+  return <BrandedWordmark className={className} />;
 }
 
 /** Drawer navigation with wordmark and item subtitles. */

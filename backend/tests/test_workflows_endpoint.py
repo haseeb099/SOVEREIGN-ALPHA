@@ -44,7 +44,7 @@ async def test_workflow_hitl_pause(client, monkeypatch):
         }
     )
     mock_resume = AsyncMock(return_value={"workflow_id": wf_id, "status": "running"})
-    mock_get = AsyncMock(
+    mock_get_status = AsyncMock(
         return_value={
             "workflow_id": wf_id,
             "status": "awaiting_approval",
@@ -58,8 +58,10 @@ async def test_workflow_hitl_pause(client, monkeypatch):
     monkeypatch.setattr("routers.workflows.start_due_diligence_workflow", mock_start)
     monkeypatch.setattr("services.workflow_service.resume_workflow", mock_resume)
     monkeypatch.setattr("routers.workflows.resume_workflow", mock_resume)
-    monkeypatch.setattr("services.workflow_service.get_workflow_status", mock_get)
-    monkeypatch.setattr("routers.workflows.get_workflow_status", mock_get)
+    monkeypatch.setattr("services.workflow_service.verify_workflow_access", AsyncMock(return_value=True))
+    monkeypatch.setattr("routers.workflows.verify_workflow_access", AsyncMock(return_value=True))
+    monkeypatch.setattr("services.workflow_service.get_workflow_status", mock_get_status)
+    monkeypatch.setattr("routers.workflows.get_workflow_status", mock_get_status)
 
     resp = await client.post(
         "/api/workflows/due-diligence",
@@ -79,6 +81,6 @@ async def test_workflow_hitl_pause(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_workflow_not_found(client, monkeypatch):
-    monkeypatch.setattr("routers.workflows.get_workflow_status", AsyncMock(return_value=None))
+    monkeypatch.setattr("routers.workflows.verify_workflow_access", AsyncMock(return_value=False))
     resp = await client.get("/api/workflows/00000000-0000-0000-0000-000000000001")
     assert resp.status_code == 404

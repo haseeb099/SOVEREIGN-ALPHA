@@ -16,6 +16,10 @@ import {
 import type { AnalyzeResponse } from "@sovereign/shared";
 import { fetchCompareBatch } from "@/lib/api";
 import { classifyFetchError, toastApiError } from "@/lib/api-errors";
+import {
+  CompetitivePeerTable,
+  extractCompetitiveFromAnalysis,
+} from "@/components/terminal/research-dossier-panel";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { computeThesisHealthPct } from "@/lib/thesis-health";
@@ -36,6 +40,8 @@ import {
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+const COMPARE_TIMEOUT_MS = 120_000;
 
 const PRESETS = [
   { label: "Core", tickers: "TSLA,BTC,XAU" },
@@ -109,6 +115,7 @@ export default function ComparePage() {
   const [tickerStatuses, setTickerStatuses] = useState<Record<string, "pending" | "done" | "failed">>({});
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const userCancelledRef = useRef(false);
   const stopAutoRetryRef = useRef<() => void>(() => {});
 
   const tickersInput = tickerChips.join(",");
@@ -131,9 +138,11 @@ export default function ComparePage() {
       toast.error("Enter at least one ticker");
       return;
     }
+    userCancelledRef.current = false;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), COMPARE_TIMEOUT_MS);
     setLoading(true);
     setError(null);
     setFailures([]);
@@ -172,20 +181,27 @@ export default function ComparePage() {
       if (valid.length > 0) toast.success(`Compared ${valid.length} asset(s)`);
       if (failed.length > 0) toast.warning(`${failed.length} ticker(s) failed`);
     } catch (e) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (!userCancelledRef.current) {
+          const apiError = classifyFetchError(e);
+          setError(apiError);
+          toastApiError(apiError);
+        }
+        return;
+      }
       const apiError = classifyFetchError(e);
       setError(apiError);
       toastApiError(apiError);
       throw e;
     } finally {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-        setProgress(null);
-      }
+      clearTimeout(timeoutId);
+      setLoading(false);
+      setProgress(null);
     }
   };
 
   const cancelCompare = () => {
+    userCancelledRef.current = true;
     abortRef.current?.abort();
     setLoading(false);
     setProgress(null);
@@ -267,6 +283,16 @@ export default function ComparePage() {
       ? rows.reduce((s, r) => s + (r.sovereign_score ?? 0), 0) / rows.length
       : null;
   const bullishCount = rows.filter((r) => r.memo.rating === "BULLISH").length;
+
+  const competitiveMatrix = useMemo(() => {
+    for (const row of rows) {
+      const competitive = extractCompetitiveFromAnalysis(row);
+      if (competitive && (competitive.peer_matrix?.length || competitive.peers?.length)) {
+        return { ticker: row.ticker, competitive };
+      }
+    }
+    return null;
+  }, [rows]);
 
   return (
     <DashboardShell
@@ -458,6 +484,27 @@ export default function ComparePage() {
           />
         )}
 
+        {competitiveMatrix && (
+          <Card className="overflow-hidden border-border/60 bg-card/40">
+            <CardHeader className="border-b border-border/40 py-3">
+              <CardTitle className="text-sm font-medium">
+                Competitive peer matrix — {competitiveMatrix.ticker}
+              </CardTitle>
+              <p className="text-[10px] text-muted-foreground">
+                Structured peer comparison from the research pre-pass competitive agent.
+              </p>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto p-3">
+                <CompetitivePeerTable
+                  competitive={competitiveMatrix.competitive}
+                  subjectTicker={competitiveMatrix.ticker}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {(sorted.length > 0 || failures.length > 0) && (
           <Card className="overflow-hidden border-border/60 bg-card/40">
             <CardHeader className="flex flex-row items-center justify-between border-b border-border/40 py-3">
@@ -633,6 +680,19 @@ export default function ComparePage() {
                     <p className="panel-label mb-1">Bear</p>
                     <p className="text-muted-foreground">{selectedRow.memo.bear_verdict}</p>
                   </div>
+                  {(() => {
+                    const competitive = extractCompetitiveFromAnalysis(selectedRow);
+                    if (!competitive) return null;
+                    return (
+                      <div>
+                        <p className="panel-label mb-2">Peer Comparison</p>
+                        <CompetitivePeerTable
+                          competitive={competitive}
+                          subjectTicker={selectedRow.ticker}
+                        />
+                      </div>
+                    );
+                  })()}
                   <Button
                     className="mt-2"
                     render={<Link href={`/terminal/${selectedRow.ticker}/memo`} />}

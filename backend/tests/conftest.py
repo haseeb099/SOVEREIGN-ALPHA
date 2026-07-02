@@ -13,7 +13,55 @@ os.environ.setdefault("NEWS_API_KEY", "")
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
 
+os.environ.setdefault("SKIP_DB_INIT", "false")
+
 from main import app  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def bypass_plan_gate_in_tests(monkeypatch, request):
+    """Existing integration tests assume Pro access; plan_gate tests opt out."""
+    if request.node.get_closest_marker("plan_gate"):
+        return
+    if request.node.get_closest_marker("db_guard"):
+        return
+
+    from middleware.auth import DEV_LOCAL_USER, dev_auth_enabled, require_auth
+
+    async def _require_pro(request):
+        try:
+            return require_auth(request)
+        except Exception:
+            if dev_auth_enabled():
+                request.state.user_id = DEV_LOCAL_USER
+                return DEV_LOCAL_USER
+            raise
+
+    monkeypatch.setattr("services.plan_service.require_pro_plan", _require_pro)
+    for mod in (
+        "routers.portfolio",
+        "routers.library",
+        "routers.alerts",
+        "routers.copilot",
+        "routers.reports",
+    ):
+        monkeypatch.setattr(f"{mod}.require_pro_plan", _require_pro)
+
+    for mod in (
+        "services.db_guard",
+        "services.plan_service",
+        "routers.billing",
+        "routers.portfolio",
+        "routers.library",
+        "routers.alerts",
+        "routers.waitlist",
+        "routers.beta",
+        "routers.onboarding",
+        "routers.workspaces",
+        "routers.enterprise_leads",
+        "routers.webhooks_clerk",
+    ):
+        monkeypatch.setattr(f"{mod}.require_db", lambda: None)
 
 
 MARKET_SCHEMA_KEYS = {
@@ -66,6 +114,27 @@ MEMO_SCHEMA_KEYS = {
     "audit_warnings",
     "distribution",
 }
+
+
+@pytest.fixture(autouse=True)
+def _bypass_pro_plan_for_integration(monkeypatch, request):
+    """Most API tests predate Pro gating — allow dev user through unless testing plan_gate."""
+    if request.module.__name__ == "test_plan_gate":
+        return
+
+    async def _allow(request):
+        from middleware.auth import require_auth
+
+        return require_auth(request)
+
+    for mod in (
+        "routers.portfolio",
+        "routers.copilot",
+        "routers.reports",
+        "routers.library",
+        "routers.alerts",
+    ):
+        monkeypatch.setattr(f"{mod}.require_pro_plan", _allow)
 
 
 @pytest.fixture
@@ -161,6 +230,24 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             ],
             "requires_hitl": ["fetch_edgar", "analyze", "report"],
         }
+    if "Company Research Agent" in system_prompt:
+        return {"agent": "COMPANY_RESEARCH", "score": 7.0, "financials_summary": "Solid", "log_message": "Company research complete", **trace_base}
+    if "Sector & Macro Research Agent" in system_prompt:
+        return {"agent": "SECTOR_MACRO", "score": 6.5, "industry_trends": "EV adoption", "log_message": "Sector research complete", **trace_base}
+    if "Competitive Analysis Agent" in system_prompt:
+        return {
+            "agent": "COMPETITIVE",
+            "score": 6.8,
+            "peer_matrix": [{"ticker": "RIVN", "revenue_growth_pct": 12.0}],
+            "log_message": "Competitive analysis complete",
+            **trace_base,
+        }
+    if "ESG & Compliance Agent" in system_prompt:
+        return {"agent": "ESG", "score": 7.5, "sanctions_hit": False, "governance_score": 7.5, "log_message": "ESG complete", **trace_base}
+    if "Insider Sentiment Agent" in system_prompt:
+        return {"agent": "INSIDER", "score": 5.5, "net_sentiment": "neutral", "notable_transactions": ["CEO sold shares"], "log_message": "Insider complete", **trace_base}
+    if "Options Flow Agent" in system_prompt:
+        return {"agent": "OPTIONS_FLOW", "score": 6.0, "signal": "bullish", "signal_strength": 6.5, "log_message": "Options complete", **trace_base}
     if "Verification Agent" in system_prompt:
         return {
             "passed": True,
@@ -169,6 +256,23 @@ def _agent_json_for_prompt(system_prompt: str) -> dict:
             "recommendation": "proceed",
             "log_message": "Verification complete",
         }
+    if "Company Research Agent" in system_prompt:
+        return {"agent": "COMPANY_RESEARCH", "score": 7.0, "financials_summary": "Solid", "log_message": "Company research done", **trace_base}
+    if "Sector Macro Research Agent" in system_prompt:
+        return {"agent": "SECTOR_MACRO", "score": 6.5, "industry_trends": "Growing", "log_message": "Sector macro done", **trace_base}
+    if "Competitive Analysis Agent" in system_prompt:
+        return {
+            "agent": "COMPETITIVE",
+            "peer_matrix": [{"ticker": "RIVN", "revenue_growth": "10%", "margins": "5%", "valuation": "2x", "market_share": "8%"}],
+            "log_message": "Competitive done",
+            **trace_base,
+        }
+    if "ESG Compliance Agent" in system_prompt:
+        return {"agent": "ESG", "governance_score": 7, "sanctions_hit": False, "log_message": "ESG done", **trace_base}
+    if "Insider Sentiment Agent" in system_prompt:
+        return {"agent": "INSIDER", "sentiment_score": 2.0, "net_sentiment": "bullish", "log_message": "Insider done", **trace_base}
+    if "Options Flow Agent" in system_prompt:
+        return {"agent": "OPTIONS_FLOW", "signal_strength": 5.5, "direction": "bullish", "log_message": "Options done", **trace_base}
     if "Synthesis Agent" in system_prompt:
         return {
             "agent": "SYNTHESIS",
@@ -218,6 +322,12 @@ def mock_cerebras_agent(monkeypatch):
         "synthesis_agent",
         "planning_agent",
         "verification_agent",
+        "company_research_agent",
+        "sector_macro_research_agent",
+        "competitive_analysis_agent",
+        "esg_compliance_agent",
+        "insider_sentiment_agent",
+        "options_flow_agent",
     ):
         monkeypatch.setattr(f"agents.{mod}._call_agent", fake_call)
     return fake_call

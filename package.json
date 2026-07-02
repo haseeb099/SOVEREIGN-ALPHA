@@ -6,6 +6,9 @@
     "dev:api": "cd backend && uvicorn main:app --reload --port 8000",
     "dev:all": "concurrently -k -n api,web -c blue,green \"pnpm dev:api\" \"pnpm dev\"",
     "dev:stack": "docker compose up -d redis postgres && pnpm dev:all",
+    "db:migrate": "cd backend && alembic upgrade head",
+    "db:seed-demo": "cd backend && python scripts/seed_demo.py",
+    "db:seed-demo": "cd backend && python scripts/seed_demo.py",
     "build": "pnpm --filter @sovereign/web build",
     "typecheck": "pnpm --filter @sovereign/web typecheck",
     "lint": "pnpm --filter @sovereign/web lint"

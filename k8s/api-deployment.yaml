@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sovereign-alpha-api
+  namespace: sovereign-alpha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sovereign-alpha-api
+  template:
+    metadata:
+      labels:
+        app: sovereign-alpha-api
+    spec:
+      containers:
+        - name: api
+          image: sovereign-alpha-api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: sovereign-alpha-config
+            - secretRef:
+                name: sovereign-alpha-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

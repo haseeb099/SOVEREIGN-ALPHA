@@ -8,6 +8,7 @@ import type { IngestExtraction } from "@sovereign/shared";
 import { deleteLibraryDocument, fetchLibraryDocuments, ingestDocument, ingestDocumentBatch } from "@/lib/api";
 import { authRequiredMessage, ApiError, classifyFetchError, toastApiError } from "@/lib/api-errors";
 import { AuthGate } from "@/components/auth/auth-gate";
+import { PlanGate } from "@/components/auth/plan-gate";
 import { CorpusDetailPanel } from "@/components/library/corpus-detail-panel";
 import { ReportHistoryPanel } from "@/components/reports/report-history-panel";
 import { useSystemHealth } from "@/hooks/use-system-health";
@@ -270,6 +271,9 @@ export default function LibraryPage() {
         )
       : undefined);
 
+  const serviceUnavailable =
+    loadError instanceof ApiError && loadError.status === 503;
+
   return (
     <DashboardShell
       title="Library"
@@ -286,6 +290,10 @@ export default function LibraryPage() {
             </CardContent>
           </Card>
         )}
+        {serviceUnavailable ? (
+          <ApiErrorState error={loadError} onRetry={() => void refresh()} />
+        ) : (
+        <PlanGate feature="library">
         <AuthGate show={authError}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard
@@ -556,6 +564,8 @@ export default function LibraryPage() {
           </CardContent>
         </Card>
         </AuthGate>
+        </PlanGate>
+        )}
 
         <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
           <DialogContent>

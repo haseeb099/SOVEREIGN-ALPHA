@@ -46,7 +46,7 @@ export function MacroNewsTicker({
   const loadEvents = () => {
     setLoading(true);
     setError(false);
-    void fetchTickerNews(ticker, 8)
+    void fetchTickerNews(ticker, 16)
       .then((data) => {
         setEvents(data.events ?? []);
         setSentimentScore(data.ticker_sentiment_score);
@@ -224,7 +224,7 @@ export function MacroNewsTicker({
                 className="macro-ticker-track flex h-full items-center gap-8 px-3"
                 style={{ animationPlayState: paused ? "paused" : "running" }}
               >
-                {[...events, ...events].map((ev, i) => (
+                {[...events, ...events, ...events].map((ev, i) => (
                   <button
                     key={`${ev.id ?? ev.title}-${i}`}
                     type="button"

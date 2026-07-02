@@ -15,6 +15,7 @@ async def save_analysis(
     scenario: dict,
     result: dict,
     user_id: Optional[str] = None,
+    org_id=None,
 ) -> Optional[str]:
     try:
         memo = result.get("memo") or {}
@@ -26,6 +27,7 @@ async def save_analysis(
                 scenario=scenario,
                 result=result,
                 user_id=user_id,
+                org_id=org_id,
                 sovereign_score=score_val,
                 distribution=memo.get("distribution"),
             )
@@ -37,6 +39,7 @@ async def save_analysis(
                 thesis_points=result.get("thesis_points") or [],
                 memo_rating=memo.get("rating"),
                 user_id=user_id,
+                org_id=org_id,
             )
             session.add(snapshot)
             await session.commit()
@@ -50,6 +53,7 @@ async def save_health_snapshot(
     ticker: str,
     result: dict,
     user_id: Optional[str] = None,
+    org_id=None,
 ) -> Optional[str]:
     try:
         memo = result.get("memo") or {}
@@ -58,6 +62,7 @@ async def save_health_snapshot(
         async with AsyncSessionLocal() as session:
             row = ThesisHealthSnapshot(
                 user_id=user_id,
+                org_id=org_id,
                 ticker=ticker.upper(),
                 score=float(score_val),
                 target=float(memo.get("price_target") or 0),
@@ -124,7 +129,12 @@ async def save_ingestion(
         return None
 
 
-async def get_analysis_history(ticker: str, limit: int = 20) -> list[dict[str, Any]]:
+async def get_analysis_history(
+    ticker: str,
+    limit: int = 20,
+    user_id: Optional[str] = None,
+    org_id=None,
+) -> list[dict[str, Any]]:
     try:
         async with AsyncSessionLocal() as session:
             stmt = (
@@ -133,6 +143,12 @@ async def get_analysis_history(ticker: str, limit: int = 20) -> list[dict[str, A
                 .order_by(ThesisAnalysis.created_at.desc())
                 .limit(limit)
             )
+            if user_id:
+                stmt = stmt.where(ThesisAnalysis.user_id == user_id)
+            if org_id:
+                stmt = stmt.where(
+                    (ThesisAnalysis.org_id == org_id) | (ThesisAnalysis.org_id.is_(None))
+                )
             rows = (await session.execute(stmt)).scalars().all()
             return [
                 {

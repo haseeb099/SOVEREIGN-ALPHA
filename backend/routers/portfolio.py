@@ -9,6 +9,8 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models import Holding, User
+from services.db_guard import require_db
+from services.plan_service import require_pro_plan
 from services.portfolio_service import compute_portfolio_summary
 
 router = APIRouter()
@@ -43,6 +45,8 @@ async def _ensure_user(user_id: str) -> None:
 
 @router.get("/portfolio/holdings")
 async def list_holdings(request: Request):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user_id(request)
     async with AsyncSessionLocal() as session:
         stmt = select(Holding).where(Holding.user_id == user_id)
@@ -63,6 +67,8 @@ async def list_holdings(request: Request):
 
 @router.post("/portfolio/holdings")
 async def create_holding(request: Request, body: HoldingCreate):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user_id(request)
     await _ensure_user(user_id)
     async with AsyncSessionLocal() as session:
@@ -81,6 +87,8 @@ async def create_holding(request: Request, body: HoldingCreate):
 
 @router.put("/portfolio/holdings/{holding_id}")
 async def update_holding(request: Request, holding_id: str, body: HoldingUpdate):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user_id(request)
     async with AsyncSessionLocal() as session:
         h = await session.get(Holding, uuid.UUID(holding_id))
@@ -98,6 +106,8 @@ async def update_holding(request: Request, holding_id: str, body: HoldingUpdate)
 
 @router.delete("/portfolio/holdings/{holding_id}")
 async def delete_holding(request: Request, holding_id: str):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user_id(request)
     async with AsyncSessionLocal() as session:
         h = await session.get(Holding, uuid.UUID(holding_id))
@@ -110,6 +120,8 @@ async def delete_holding(request: Request, holding_id: str):
 
 @router.post("/portfolio/import")
 async def import_csv(request: Request, file: UploadFile = File(...)):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user_id(request)
     await _ensure_user(user_id)
     contents = await file.read()
@@ -134,6 +146,8 @@ async def portfolio_summary(request: Request):
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
         return await compute_portfolio_summary([])
+    await require_pro_plan(request)
+    require_db()
     async with AsyncSessionLocal() as session:
         stmt = select(Holding).where(Holding.user_id == user_id)
         rows = (await session.execute(stmt)).scalars().all()

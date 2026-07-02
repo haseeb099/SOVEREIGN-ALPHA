@@ -7,6 +7,8 @@ from sqlalchemy import delete, select
 from database import AsyncSessionLocal
 from middleware.auth import extract_user_id
 from models import DocumentChunk, DocumentLibraryItem, IngestedDocument
+from services.db_guard import require_db
+from services.plan_service import require_pro_plan
 
 router = APIRouter()
 
@@ -20,6 +22,8 @@ def _require_user(request: Request) -> str:
 
 @router.get("/library")
 async def list_library(request: Request):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     async with AsyncSessionLocal() as session:
         rows = (
@@ -67,6 +71,8 @@ async def list_library(request: Request):
 
 @router.get("/library/{doc_id}")
 async def get_document(request: Request, doc_id: str):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     import uuid
 
@@ -90,6 +96,8 @@ async def get_document(request: Request, doc_id: str):
 
 @router.delete("/library/{doc_id}")
 async def delete_document(request: Request, doc_id: str):
+    await require_pro_plan(request)
+    require_db()
     user_id = _require_user(request)
     import uuid
 

@@ -9,6 +9,8 @@ import {
 
 const SHORTCUTS = [
   { keys: "Alt+T", description: "Open thesis tracker tab" },
+  { keys: "Alt+D", description: "Open research dossier tab" },
+  { keys: "Alt+L", description: "Open valuation lab tab" },
   { keys: "Alt+C", description: "Open charts tab" },
   { keys: "S", description: "Toggle Scenario Lab panel" },
   { keys: "?", description: "Show keyboard shortcuts" },

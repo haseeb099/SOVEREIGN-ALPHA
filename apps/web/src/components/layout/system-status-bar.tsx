@@ -17,15 +17,17 @@ import { cn } from "@/lib/utils";
 import { isDataStale, staleDataLabel } from "@/lib/data-freshness";
 
 const STATUS_STYLES: Record<ConnectionStatus, string> = {
-  live: "border-status-live/40 text-status-live",
+  live: "border-status-live/50 text-status-live",
   degraded: "border-status-degraded/40 text-status-degraded",
   offline: "border-status-offline/40 text-status-offline",
+  connecting: "border-status-degraded/40 text-status-degraded",
 };
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   live: "LIVE",
   degraded: "DEGRADED",
   offline: "OFFLINE",
+  connecting: "CONNECTING",
 };
 
 const USER_LABELS: Record<string, string> = {
@@ -106,8 +108,18 @@ export function SystemStatusBar({
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const showDevHint = process.env.NODE_ENV === "development";
   const subs = health?.subsystems;
-  const wsLive = wsConnected && status !== "offline";
+  const wsLive = wsConnected && status !== "offline" && status !== "connecting";
   const offlineBanner = status === "offline" || showCachedBanner;
+  const isConnecting = status === "connecting" || Boolean(refreshing && !health);
+  const healthStatus = health?.status?.toLowerCase();
+  const indicatorStatus: ConnectionStatus =
+    healthStatus === "ok" || healthStatus === "healthy"
+      ? "live"
+      : healthStatus === "degraded"
+        ? "degraded"
+        : healthStatus === "offline" || healthStatus === "error"
+          ? "offline"
+          : status;
 
   const lastMarketFetch =
     typeof subs?.last_market_fetch_at === "number"
@@ -125,8 +137,8 @@ export function SystemStatusBar({
     { devKey: "newsapi", value: subsystemDisplay("newsapi", subs?.newsapi), unknown: !subs?.newsapi?.status },
     {
       devKey: "last_market_fetch",
-      value: lastMarketFetch,
-      unknown: !lastMarketFetch,
+      value: lastMarketFetch ?? "Never",
+      unknown: false,
     },
     {
       devKey: "last_analysis",
@@ -154,20 +166,22 @@ export function SystemStatusBar({
             onClick={() => setOpen(true)}
             className={cn(
               "inline-flex h-6 items-center gap-1.5 border px-2 uppercase transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
-              STATUS_STYLES[status],
+              STATUS_STYLES[indicatorStatus],
             )}
-            aria-label={`${STATUS_LABEL[status]} system health details`}
+            aria-label={`${STATUS_LABEL[indicatorStatus]} system health details`}
             title="System health · Alt+T opens tracker"
           >
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                status === "live" && "bg-status-live",
-                status === "degraded" && "bg-status-degraded",
-                status === "offline" && "bg-status-offline",
+                isConnecting && "animate-status-connect",
+                indicatorStatus === "live" && "bg-status-live",
+                indicatorStatus === "degraded" && "bg-status-degraded",
+                indicatorStatus === "offline" && "bg-status-offline",
+                indicatorStatus === "connecting" && "bg-status-degraded",
               )}
             />
-            {STATUS_LABEL[status]}
+            {STATUS_LABEL[indicatorStatus]}
             <ChevronDown className="size-3 opacity-60" />
           </button>
           {onRefresh && (
@@ -204,7 +218,7 @@ export function SystemStatusBar({
               ? isDataStale(lastAnalysisAt)
                 ? staleDataLabel(lastAnalysisAt)
                 : formatTimestamp(lastAnalysisAt, { showTz: true })
-              : status === "offline"
+              : status === "offline" || status === "connecting"
                 ? "Connecting…"
                 : "Ready"}
           </span>
